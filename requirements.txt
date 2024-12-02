@@ -1,0 +1,6 @@
+python-dotenv
+wikipedia
+openai
+selenium
+google-api-python-client
+oauth2client
