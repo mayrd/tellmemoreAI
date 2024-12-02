@@ -1,3 +1,10 @@
+# own rules
+chromedriver.exe
+client_secrets.json
+google_service_account.json
+yt.py-oauth2.json
+database.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
