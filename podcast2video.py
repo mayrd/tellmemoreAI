@@ -55,12 +55,12 @@ def podcast2video(folder_name: str) -> bool:
     # read metadata file, and abort if not exists
     md_file = os.path.join(folder_name, "metadata.json")
     if not os.path.isfile(md_file):
-        print(f"{md_file} not found - skipping.")
+        print(f"  {md_file} not found - skipping.")
         return False
 
     md =  utils.fromFile(md_file)
-    if "yt_video_id" in md and len(md["yt_video_id"])>=11:
-        print(f"video already published as " + md["yt_video_id"])
+    if "yt_video_id" in md and md["yt_video_id"] is not None and len(md["yt_video_id"])>=11:
+        print(f"  video already published as " + md["yt_video_id"])
         return True
     
     print(md)
