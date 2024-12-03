@@ -2,7 +2,7 @@
 chromedriver.exe
 client_secrets.json
 google_service_account.json
-yt.py-oauth2.json
+*.py-oauth2.json
 database.json
 podcasts/
 
