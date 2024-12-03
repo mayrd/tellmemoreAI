@@ -14,6 +14,7 @@ def gen_yt_title(wiki_article: str) -> str:
         f"We created a suspenseful podcast about the happenings. "
         f"Can you propose a great YouTube video title for the podcast? "
         f"Only respond with the proposed title and add some hashtags in the title. "
+        f"The title should not have more than 100 characters. "
         f"This is the article content the podcast is based on: {wiki_article}"
     ).replace("\"", "")
 
@@ -26,6 +27,7 @@ def gen_yt_description(wiki_article: str) -> str:
     return genai.genai_text(
         f"We created a suspenseful podcast about the happenings. "
         f"Can you propose a great YouTube video description for the podcast? "
+        f"The description should not have more than 5000 characters. "
         f"This is the article content the podcast is based on: {wiki_article}"
     )
 
@@ -50,19 +52,19 @@ def gen_thumbnail(yt_description: str, title: str, subtitle: str, filename: str)
 
 def podcast2video(folder_name: str) -> bool:
     print(f"checking {folder_name}")
-    # skip, if there is a video.mp4
-    if os.path.isfile(os.path.join(folder_name, "video.mp4")):
-        print(f"video already exists in {folder_name}")
-        return False
-
     # read metadata file, and abort if not exists
     md_file = os.path.join(folder_name, "metadata.json")
     if not os.path.isfile(md_file):
-        print(f"{md_file} not found")
+        print(f"{md_file} not found - skipping.")
         return False
 
     md =  utils.fromFile(md_file)
+    if "yt_video_id" in md and len(md["yt_video_id"])>=11:
+        print(f"video already published as " + md["yt_video_id"])
+        return True
+    
     print(md)
+
     article = wiki.fetch_wiki_article(md["wiki_title"])
     if len(article)  > 60000:
         article = wiki.get_wiki_summary(md["wiki_title"])
@@ -98,12 +100,13 @@ def podcast2video(folder_name: str) -> bool:
         print(f"create {video_file}")
         media.podcast2video(podcast_file, os.path.join(folder_name, "img*.jpg"), video_file)
 
-    print("DONE! Ready for upload!")
-
+    print("upload")
     md["yt_video_id"] = yt.upload_video(video_file, md["yt_title"], md["yt_description"], md["yt_tags"])
 
     print(utils.toJSON(md))
     utils.toFile(md, md_file)
+    
+    print("Done")
     return True
 
 
