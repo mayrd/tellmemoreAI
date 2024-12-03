@@ -11,12 +11,15 @@ import os
 import shutil
 import wiki
 import utils
+import dotenv
 
+dotenv.load_dotenv()
 
 PROMPT_PODCAST = (
     "The title of the podcast is \"Tell me More - Stories Told as Podcast\" - welcome people and say the name of the podcast. Do not mention the wikipedia article. "
     "Make a suspenseful podcast describing the event, how it happened, what was done and how it turned out. make it adventurous and catchy. "
-    "in the middle of the podcast, tell people to hit the subscribe button, to not miss any another podcasts on \"Tell me More\"."
+    "In the middle of the podcast, tell people to hit the subscribe button, to not miss any another podcasts on \"Tell me More\". "
+    "Make the podcast 30 minutes long."
 )
 LOCAL_CHROME_PROFILE = os.getenv("CHROME_PROFILE_FOLDER")
 LOCAL_DOWNLOAD = os.getenv("CHROME_DOWNLOAD_FOLDER")
@@ -93,7 +96,6 @@ def step3_add_website(driver, URL):
     elem_url.send_keys(URL)
     time.sleep(2)
     elem_url.send_keys(Keys.RETURN)
-    print("Einfuegen")
     #driver.find_element(By.CLASS_NAME,"mat-mdc-button-base").click()
 
 
@@ -153,7 +155,13 @@ def process():
 
         item["folder"] = utils.build_folder_name(item["title"])
         utils.create_folder(item['folder'])
-        shutil.move(wavefile, os.path.join(item["folder"], "podcast.wav"))
+        shutil.move(os.path.join(os.getenv("CHROME_DOWNLOAD_FOLDER"), wavefile), os.path.join(item["folder"], "podcast.wav"))
+        
+        md = dict()
+        md["category"] = item["category"]
+        md["wiki_title"] = item["title"]
+
+        utils.toFile(md,  os.path.join(item["folder"], "metadata.json"))
         utils.toFile(db, "database.json")
         print(f"Done with {item}")
         return
