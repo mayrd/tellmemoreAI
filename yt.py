@@ -50,6 +50,9 @@ https://developers.google.com/api-client-library/python/guide/aaa_client_secrets
 VALID_PRIVACY_STATUSES = ("public", "private", "unlisted")
 
 
+class Options:
+    pass
+
 def get_authenticated_service(args):
   flow = flow_from_clientsecrets(CLIENT_SECRETS_FILE,
     scope=YOUTUBE_UPLOAD_SCOPE,
@@ -69,8 +72,7 @@ def initialize_upload(youtube, options)-> str:
     snippet=dict(
       title=options.title,
       description=options.description,
-      tags=options.tags,
-      categoryId=options.category
+      tags=options.tags
     ),
     status=dict(
       privacyStatus=options.privacyStatus
@@ -121,13 +123,12 @@ def resumable_upload(insert_request)-> str:
 
 
 def upload_video(video_file: str, title: str, description: str, tags: list[str]) -> str:
-  options = {
-    "file": video_file,
-    "title": title,
-    "description": description,
-    "tags": tags,
-    "privacyStatus": "private"
-  }
+  options = Options()
+  options.file = video_file
+  options.title = title
+  options.description = description
+  options.tags = tags
+  options.privacyStatus = "private"
   print(options)
   youtube = get_authenticated_service(options)
   try:
