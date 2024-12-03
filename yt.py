@@ -78,6 +78,10 @@ def initialize_upload(youtube, options)-> str:
       privacyStatus=options.privacyStatus
     )
   )
+
+  if options.playlist:
+    body["snippet"]["playlistId"] = options.playlist
+
   insert_request = youtube.videos().insert(
     part=",".join(body.keys()),
     body=body,
@@ -93,11 +97,9 @@ def resumable_upload(insert_request)-> str:
   retry = 0
   while response is None:
     try:
-      print("Uploading file...")
       status, response = insert_request.next_chunk()
       if response is not None:
         if 'id' in response:
-          print("Video id '%s' was successfully uploaded." % response['id'])
           return response['id']
         else:
           exit("The upload failed with an unexpected response: %s" % response)
@@ -129,13 +131,28 @@ def upload_video(video_file: str, title: str, description: str, tags: list[str])
   options.description = description
   options.tags = tags
   options.privacyStatus = "private"
-  print(options)
+  if os.getenv("DEFAULT_PLAYLIST"):
+    options.playlist = os.getenv("DEFAULT_PLAYLIST")
   youtube = get_authenticated_service(options)
   try:
     return initialize_upload(youtube, options)
   except HttpError as e:
     print("An HTTP error %d occurred:\n%s" % (e.resp.status, e.content))
   return None
+
+
+def set_thumbnail(video_id: str, thumbnail_file: str) -> bool:
+  youtube = get_authenticated_service(options)
+  try:
+    with open(thumbnail_file, 'rb') as f:
+      response = youtube.thumbnails().set(
+          videoId=video_id,
+          media_body=f,
+          media_mime_type='image/jpeg'
+      ).execute()
+  except HttpError as e:
+    print("An HTTP error %d occurred:\n%s" % (e.resp.status, e.content))
+  return False
 
 
 def main():
