@@ -29,6 +29,7 @@ def get_driver():
     opts = webdriver.ChromeOptions()
     opts.add_argument(f"user-data-dir={LOCAL_CHROME_PROFILE}")
     opts.add_argument("start-maximized")
+    opts.add_argument("headless")
     return webdriver.Chrome(options = opts)
 
 
@@ -67,11 +68,14 @@ def gen_podcast(URL:str) ->str:
                     return file
 
         print("Time over, but file not found!")
-        return None
     except:
         print("Error")
 
+    time.sleep(2)
     driver.close()
+    time.sleep(2)
+    driver.switch_to.window(driver.window_handles[0])
+    driver.quit()
     return None
 
 
@@ -146,8 +150,11 @@ def process():
             continue
 
         #found one..
-        print("Generate podcast for "+item["title"])
-        url = wiki.get_wiki_url(item["title"])
+        print("Generate podcast for " + item["title"])
+        if "url" not in item:
+            url = wiki.get_wiki_url(item["title"])
+        else:
+            url = item["url"]
         wavefile = gen_podcast(url)
         if not wavefile:
             print("hmm, wavefile not generated, continue with something else")
@@ -161,7 +168,7 @@ def process():
         md["category"] = item["category"]
         md["wiki_title"] = item["title"]
 
-        utils.toFile(md,  os.path.join(item["folder"], "metadata.json"))
+        utils.toFile(md, os.path.join(item["folder"], "metadata.json"))
         utils.toFile(db, "database.json")
         print(f"Done with {item}")
         return
@@ -170,4 +177,4 @@ def process():
 if __name__ == "__main__":
     while(True):
         process()
-        time.sleep(15*60)
+        time.sleep(5*60)
