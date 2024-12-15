@@ -62,6 +62,8 @@ def get_authenticated_service(args):
   credentials = storage.get()
 
   if credentials is None or credentials.invalid:
+    args.logging_level = "WARNING"
+    args.noauth_local_webserver = True
     credentials = run_flow(flow, storage, args)
 
   return build(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION,
