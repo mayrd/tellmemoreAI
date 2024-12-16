@@ -17,11 +17,12 @@ dotenv.load_dotenv()
 
 PROMPT_PODCAST = (
     "The title of the podcast is \"Tell me More - Stories Told as Podcast\" - welcome people and say the name of the podcast. Do not mention the wikipedia article. "
-    "Make a suspenseful podcast describing the event, how it happened, what was done and how it turned out. make it adventurous and catchy. "
+    "Make a podcast describing the event, how it happened, what was done and how it turned out. make it adventurous and catchy. "
     "In the middle of the podcast, tell people to hit the subscribe button, to not miss any another podcasts on \"Tell me More\". "
     "Make the podcast 30 minutes long."
 )
 LOCAL_CHROME_PROFILE = os.getenv("CHROME_PROFILE_FOLDER")
+LOCAL_FF_PROFILE = os.getenv("FF_PROFILE_FOLDER")
 LOCAL_DOWNLOAD = os.getenv("CHROME_DOWNLOAD_FOLDER")
 
 
@@ -29,8 +30,17 @@ def get_driver():
     opts = webdriver.ChromeOptions()
     opts.add_argument(f"user-data-dir={LOCAL_CHROME_PROFILE}")
     opts.add_argument("start-maximized")
-    opts.add_argument("headless")
+    #opts.add_argument("headless")
     return webdriver.Chrome(options = opts)
+
+def get_ff_driver():
+    opts = webdriver.FirefoxOptions()
+    opts.add_argument('-profile')
+    opts.add_argument(LOCAL_FF_PROFILE)
+    opts.add_argument("-headless")
+    opts.add_argument("--headless")
+    opts.headless = True
+    return webdriver.Firefox(options=opts)
 
 
 def gen_podcast(URL:str) ->str:
@@ -43,7 +53,7 @@ def gen_podcast(URL:str) ->str:
     # generate podcast
     # wait until podcast is generated
     # download podcast
-    driver = get_driver()
+    driver = get_ff_driver()
     try:
         print("(1) Open Notebooklm")
         step1_open_notebooklm(driver)
@@ -70,12 +80,14 @@ def gen_podcast(URL:str) ->str:
         print("Time over, but file not found!")
     except:
         print("Error")
-
-    time.sleep(2)
-    driver.close()
-    time.sleep(2)
-    driver.switch_to.window(driver.window_handles[0])
-    driver.quit()
+    finally:
+        print("(X) Teardown")
+        time.sleep(2)
+        driver.close()
+        time.sleep(2)
+        driver.switch_to.window(driver.window_handles[0])
+        driver.quit()
+    
     return None
 
 
@@ -113,6 +125,7 @@ def step4_wait_source_processing(driver):
 
 
 def step5_customize_podcast(driver):
+    time.sleep(20)
     elem_customize = driver.find_element(By.CLASS_NAME, "customize-button")
     elem_customize.click()
 
@@ -177,4 +190,4 @@ def process():
 if __name__ == "__main__":
     while(True):
         process()
-        time.sleep(5*60)
+        time.sleep(2*60)
