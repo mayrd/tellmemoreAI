@@ -11,7 +11,7 @@ import utils
 
 def gen_yt_title(wiki_article: str) -> str:
     response = genai.genai_text(
-        f"We created a suspenseful podcast about the happenings. "
+        f"We created a podcast about the happenings. "
         f"Can you propose a great YouTube video title for the podcast? "
         f"Only respond with the proposed title and add some hashtags in the title. "
         f"The title should not have more than 100 characters. "
@@ -28,7 +28,7 @@ def gen_short_title(wiki_article: str) -> str:
 
 def gen_yt_description(wiki_article: str) -> str:
     response = genai.genai_text(
-        f"We created a suspenseful podcast about the happenings. "
+        f"We created a podcast about the happenings. "
         f"Can you propose a great YouTube video description for the podcast? "
         f"The description should not have more than 5000 characters. "
         f"This is the article content the podcast is based on: {wiki_article}"
@@ -39,15 +39,18 @@ def gen_yt_description(wiki_article: str) -> str:
 
 def gen_yt_tags(wiki_article: str) -> list[str]:
     response = genai.genai_text(
-        f"We created a suspenseful podcast about the happenings. "
-        f"Can you propose a great YouTube tags for the podcast (comma-separated)? "
+        f"We created a podcast about the happenings. "
+        f"Can you propose a great set of 20 YouTube tags for the podcast (comma-separated)? "
         f"This is the article content the podcast is based on: {wiki_article}"
     )
-    return [word.strip() for word in response.split(",")]
-
+    arr = [word.strip() for word in response.split(",")]
+    if len(arr) > 25:
+        arr = arr[:25]
+    return arr
+    
 def gen_thumbnail(yt_description: str, title: str, subtitle: str, filename: str) -> None:
     url = genai.genai_image(
-        f"We created a suspenseful podcast about the happenings and this is the description. "
+        f"We created a podcast about the happenings and this is the description. "
         f"Can you generate a thumbnail supporting the podcast? "
         f"Add \"{title}\" as big text on the thumbnail and also add \"{subtitle}\" as text on the thumbnail. "
         f"This is the description what the podcast is about: {yt_description}"
@@ -118,6 +121,8 @@ if __name__ == "__main__":
     # go through the different folders in OUTPUT_FOLDER
     folders = utils.get_subfolders(os.getenv("OUTPUT_FOLDER"))
     for folder in folders:
+        if folder.startswith(os.path.join(os.getenv("OUTPUT_FOLDER"),"__")):
+            continue
         try:
             podcast2video(folder)
         except Exception as e:
