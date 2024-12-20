@@ -89,7 +89,7 @@ def get_page_by_id(pageid: str)->str:
 def fetch_wiki_article_by_id(pageid: str)->str:
     try:
         return get_page_by_id(pageid).content
-    except Error as e:
+    except Exception as e:
         print("Error:", e)
 
     return None
