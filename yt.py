@@ -8,8 +8,9 @@ import random
 import sys
 import time
 import dotenv
-
+import datetime
 import googleapiclient
+
 from apiclient.discovery import build
 from apiclient.errors import HttpError
 from apiclient.http import MediaFileUpload
@@ -191,7 +192,6 @@ def add_video_to_playlist(playlist_id, video_id) -> bool:
         }
       )
       request.execute()
-      print(f"Video {video_id} added to playlist {playlist_id}")
       return True
     except googleapiclient.errors.HttpError as e:
       print(f"An HTTP error {e.resp.status} occurred:\n{e.content}")
@@ -199,3 +199,67 @@ def add_video_to_playlist(playlist_id, video_id) -> bool:
   else:
     print(f"Video {video_id} is already in playlist {playlist_id}")
     return True
+
+
+def get_latest_scheduled_publish_time(playlist_id: str) -> datetime.datetime:
+  """Retrieves the latest scheduled publish time for videos in a YouTube playlist (handles pagination)."""
+  try:
+    youtube = get_authenticated_service()        
+    scheduled_times = []
+    next_page_token = None
+
+    while True:  # Loop to handle pagination
+      request = youtube.playlistItems().list(
+        part="snippet,contentDetails",
+        playlistId=playlist_id,
+        maxResults=50,
+        pageToken=next_page_token
+      )
+      response = request.execute()
+
+      for item in response['items']:
+        video_id = item['contentDetails']['videoId']
+        video_request = youtube.videos().list(
+          part="status",
+          id=video_id
+        )
+        video_response = video_request.execute()
+        video = video_response.get('items', [])
+        if video:
+          publish_at = video[0]['status'].get('publishAt')
+          if publish_at:
+            scheduled_times.append(publish_at)
+
+      next_page_token = response.get('nextPageToken')
+      if not next_page_token:
+        break
+
+    if scheduled_times:
+      latest_scheduled_time = max(scheduled_times)
+      return datetime.datetime.fromisoformat(latest_scheduled_time)
+    else:
+      print("No scheduled videos found in the playlist.")
+      return None
+
+  except Exception as e:
+    print(f"An error occurred: {e}")
+    return None
+
+def schedule_video(video_id: str, publish_at: datetime.datetime) -> bool:
+  try:
+    youtube = get_authenticated_service()
+    request = youtube.videos().update(
+      part="status",
+      body={
+        "id": video_id,
+        "status": {
+          "publishAt": publish_at.isoformat().replace("+00:00","Z"),
+          "privacyStatus": "private"
+        }
+      }
+    )
+    response = request.execute()
+    return True
+  except Exception as e:
+    print(f"An error occurred: {e}")
+    return False

@@ -17,7 +17,8 @@ dotenv.load_dotenv()
 
 PROMPT_PODCAST = (
     "The title of the podcast is \"Tell me More - Stories Told as Podcast\" - welcome people and say the name of the podcast. Do not mention the wikipedia article. "
-    "Make a podcast describing the event, how it happened, what was done and how it turned out. make it adventurous and catchy. "
+    "Make the podcast like story-telling: adventurous and catchy. "
+    "Try to identify one unique situation or a fun fact about the topic and add it to the podcast. "
     "In the middle of the podcast, tell people to hit the subscribe button, to not miss any another podcasts on \"Tell me More\". "
     "Make the podcast 30 minutes long."
 )

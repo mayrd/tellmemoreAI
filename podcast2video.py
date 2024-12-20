@@ -2,6 +2,7 @@
 # needs to run on linux
 
 import os
+import datetime
 # own modules
 import genai
 import wiki
@@ -85,7 +86,7 @@ def get_article(md: dict)-> str:
     return article
 
 def gen_thumbnails(md: dict, folder_name: str)-> str:
-    for i in range(1,4):
+    for i in range(1, 2):
         img_file = os.path.join(folder_name, f"img{i}.jpg")
         if not os.path.isfile(img_file):
             print(f"create {img_file}")
@@ -101,12 +102,42 @@ def add_to_playlist(videoId: str, category: str) -> bool:
     for item in playlists["list"]:
         if item["title"] == category:
             try:
-                yt.add_video_to_playlist(item["playlistid"], videoId)
-                print("added to playlist")
+                yt.add_video_to_playlist(item["playlistId"], videoId)
                 return True
             except Exception as e:
                 print("could not add to playlists: "+str(e))
     return False
+
+
+def schedule(video_id: str, category: str) -> datetime.datetime:
+    if not os.path.isfile("ytplaylists.json"):
+        print("no ytplaylists.json, so cannot schedule")
+        return None
+
+    playlists = utils.fromFile("ytplaylists.json")
+    for item in playlists["list"]:
+        if item["title"] == category:
+            try:
+                latest_pub = yt.get_latest_scheduled_publish_time(item["playlistId"])
+                next_pub = latest_pub + datetime.timedelta(days=1)
+                yt.schedule_video(video_id, next_pub)
+                return next_pub
+            except Exception as e:
+                print("could not schedule video: "+str(e))
+    return None
+
+
+def print_last_pubs():
+    if not os.path.isfile("ytplaylists.json"):
+        print("no ytplaylists.json, so cannot schedule")
+        return None
+
+    print("\nSchedules:")
+    playlists = utils.fromFile("ytplaylists.json")
+    for item in playlists["list"]:
+        latest_pub = yt.get_latest_scheduled_publish_time(item["playlistId"])
+        print(item["title"] + ": "+ latest_pub.isoformat())
+
 
 def podcast2video(folder_name: str) -> bool:
     print(f"checking {folder_name}")
@@ -142,6 +173,10 @@ def podcast2video(folder_name: str) -> bool:
     if md["yt_video_id"]:
         print(f"  uploaded to YT as " + md["yt_video_id"])
         add_to_playlist(md["yt_video_id"], md["category"])
+        pub_time = schedule(md["yt_video_id"], md["category"])
+        if pub_time is not None:
+            md["pub_time"] = pub_time.isoformat()
+            print(f"  scheduled for " + pub_time.isoformat())
     else:
         print(f"  upload failed. No video Id given")
 
@@ -159,3 +194,6 @@ if __name__ == "__main__":
             podcast2video(folder)
         except Exception as e:
             print(e)
+
+    # print pipeline for last publications
+    print_last_pubs()
