@@ -44,8 +44,8 @@ def gen_yt_tags(wiki_article: str) -> list[str]:
         f"This is the article content the podcast is based on: {wiki_article}"
     )
     arr = [word.strip() for word in response.split(",")]
-    if len(arr) > 25:
-        arr = arr[:25]
+    if len(arr) > 20:
+        arr = arr[:20]
     return arr
     
 def gen_thumbnail(yt_description: str, title: str, subtitle: str, filename: str) -> None:
@@ -59,9 +59,41 @@ def gen_thumbnail(yt_description: str, title: str, subtitle: str, filename: str)
     media.convert(filename + ".webp", filename)
 
 
+def gen_metadata(md: dict, article: str) -> dict:
+    if "short_title" not in md:
+        md["short_title"] = gen_short_title(article)
+    if "yt_title" not in md:
+        md["yt_title"] = gen_yt_title(article)
+    if "yt_description" not in md: 
+        md["yt_description"] = gen_yt_description(article)
+    if "yt_tags" not in md:
+        md["yt_tags"] = gen_yt_tags(article)
+
+    return md
+
+def get_article(md: dict)-> str:
+    if "pageid" in md and md["pageid"] is not None:
+        article = wiki.fetch_wiki_article_by_id(md["pageid"])
+        if len(article) > 60000:
+            page = wiki.get_page_by_id(md["pageid"])
+            article = page.summary
+    else:
+        article = wiki.fetch_wiki_article(md["wiki_title"])
+        if len(article)  > 60000:
+            article = wiki.get_wiki_summary(md["wiki_title"])
+
+    return article
+
+def gen_thumbnails(md: dict, folder_name: str)-> str:
+    for i in range(1,4):
+        img_file = os.path.join(folder_name, f"img{i}.jpg")
+        if not os.path.isfile(img_file):
+            print(f"create {img_file}")
+            gen_thumbnail(md["yt_description"], md["category"], md["short_title"], img_file)
+
+
 def podcast2video(folder_name: str) -> bool:
     print(f"checking {folder_name}")
-    # read metadata file, and abort if not exists
     md_file = os.path.join(folder_name, "metadata.json")
     if not os.path.isfile(md_file):
         print(f"  {md_file} not found - skipping.")
@@ -72,32 +104,11 @@ def podcast2video(folder_name: str) -> bool:
         print(f"  video already published as " + md["yt_video_id"])
         return True
 
-    if "pageid" in md and md["pageid"] is not None:
-        article = article = wiki.fetch_wiki_article_by_id(md["pageid"])
-    else:
-        article = wiki.fetch_wiki_article(md["wiki_title"])
-
-    if len(article)  > 60000:
-        article = wiki.get_wiki_summary(md["wiki_title"])
-
-    # define yt metadata
-    if "short_title" not in md:
-        md["short_title"] = gen_short_title(article)
-    if "yt_title" not in md:
-        md["yt_title"] = gen_yt_title(article)
-    if "yt_description" not in md: 
-        md["yt_description"] = gen_yt_description(article)
-    if "yt_tags" not in md:
-        md["yt_tags"] = gen_yt_tags(article)
-
+    article = get_article(md)
+    md = gen_metadata(md, article)
     utils.toFile(md, md_file)
 
-    # create thumbnail images
-    for i in range(1,4):
-        img_file = os.path.join(folder_name, f"img{i}.jpg")
-        if not os.path.isfile(img_file):
-            print(f"create {img_file}")
-            gen_thumbnail(md["yt_description"], md["category"], md["short_title"], img_file)
+    gen_thumbnails(md, folder_name)
 
     # check for podcast.wav
     podcast_file = os.path.join(folder_name, "podcast.wav")
