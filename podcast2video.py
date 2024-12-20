@@ -72,7 +72,11 @@ def podcast2video(folder_name: str) -> bool:
         print(f"  video already published as " + md["yt_video_id"])
         return True
 
-    article = wiki.fetch_wiki_article(md["wiki_title"])
+    if "pageid" in md and md["pageid"] is not None:
+        article = article = wiki.fetch_wiki_article_by_id(md["pageid"])
+    else:
+        article = wiki.fetch_wiki_article(md["wiki_title"])
+
     if len(article)  > 60000:
         article = wiki.get_wiki_summary(md["wiki_title"])
 
