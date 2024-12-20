@@ -92,6 +92,22 @@ def gen_thumbnails(md: dict, folder_name: str)-> str:
             gen_thumbnail(md["yt_description"], md["category"], md["short_title"], img_file)
 
 
+def add_to_playlist(videoId: str, category: str) -> bool:
+    if not os.path.isfile("ytplaylists.json"):
+        print("no ytplaylists.json, so no playlist to add item to")
+        return False
+
+    playlists = utils.fromFile("ytplaylists.json")
+    for item in playlists["list"]:
+        if item["title"] == category:
+            try:
+                yt.add_video_to_playlist(item["playlistid"], videoId)
+                print("added to playlist")
+                return True
+            except Exception as e:
+                print("could not add to playlists: "+str(e))
+    return False
+
 def podcast2video(folder_name: str) -> bool:
     print(f"checking {folder_name}")
     md_file = os.path.join(folder_name, "metadata.json")
@@ -125,6 +141,7 @@ def podcast2video(folder_name: str) -> bool:
     md["yt_video_id"] = yt.upload_video(video_file, md["yt_title"], md["yt_description"], md["yt_tags"])
     if md["yt_video_id"]:
         print(f"  uploaded to YT as " + md["yt_video_id"])
+        add_to_playlist(md["yt_video_id"], md["category"])
     else:
         print(f"  upload failed. No video Id given")
 

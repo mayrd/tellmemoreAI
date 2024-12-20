@@ -81,9 +81,6 @@ def initialize_upload(youtube, options)-> str:
     )
   )
 
-  if options.playlist:
-    body["snippet"]["playlistId"] = options.playlist
-
   insert_request = youtube.videos().insert(
     part=",".join(body.keys()),
     body=body,
@@ -133,8 +130,6 @@ def upload_video(video_file: str, title: str, description: str, tags: list[str])
   options.description = description
   options.tags = tags
   options.privacyStatus = "private"
-  if os.getenv("DEFAULT_PLAYLIST"):
-    options.playlist = os.getenv("DEFAULT_PLAYLIST")
   youtube = get_authenticated_service(options)
   try:
     return initialize_upload(youtube, options)
@@ -144,7 +139,7 @@ def upload_video(video_file: str, title: str, description: str, tags: list[str])
 
 
 def set_thumbnail(video_id: str, thumbnail_file: str) -> bool:
-  youtube = get_authenticated_service(options)
+  youtube = get_authenticated_service(dict())
   try:
     with open(thumbnail_file, 'rb') as f:
       response = youtube.thumbnails().set(
@@ -155,6 +150,47 @@ def set_thumbnail(video_id: str, thumbnail_file: str) -> bool:
   except HttpError as e:
     print("An HTTP error %d occurred:\n%s" % (e.resp.status, e.content))
   return False
+
+
+def is_video_in_playlist(playlist_id: str, video_id: str) -> bool:
+  """Checks if a video is already in a playlist."""
+  try:
+    youtube = get_authenticated_service(dict())
+    request = youtube.playlistItems().list(
+      part="snippet",
+      playlistId=playlist_id,
+      videoId=video_id
+    )
+    response = request.execute()
+    return len(response.get("items", [])) > 0
+  except googleapiclient.errors.HttpError as e:
+    print(f"An HTTP error {e.resp.status} occurred:\n{e.content}")
+    return False
+
+
+def add_video_to_playlist(playlist_id, video_id):
+  """Adds a video to a playlist if it's not already there."""
+  if not is_video_in_playlist(playlist_id, video_id):
+    try:
+      youtube = get_authenticated_service(dict())
+      request = youtube.playlistItems().insert(
+        part="snippet",
+        body={
+          "snippet": {
+            "playlistId": playlist_id,
+            "resourceId": {
+              "kind": "youtube#video",
+              "videoId": video_id,
+            }
+          }
+        }
+      )
+      request.execute()
+      print(f"Video {video_id} added to playlist {playlist_id}")
+    except googleapiclient.errors.HttpError as e:
+      print(f"An HTTP error {e.resp.status} occurred:\n{e.content}")
+  else:
+    print(f"Video {video_id} is already in playlist {playlist_id}")
 
 
 def main():
@@ -179,6 +215,7 @@ def main():
     initialize_upload(youtube, args)
   except HttpError as e:
     print("An HTTP error %d occurred:\n%s" % (e.resp.status, e.content))
+
 
 if __name__ == '__main__':
   main()
