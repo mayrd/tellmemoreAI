@@ -21,25 +21,26 @@ PROMPT_PODCAST = (
     "In the middle of the podcast, tell people to hit the subscribe button, to not miss any another podcasts on \"Tell me More\". "
     "Make the podcast 30 minutes long."
 )
-LOCAL_CHROME_PROFILE = os.getenv("CHROME_PROFILE_FOLDER")
-LOCAL_FF_PROFILE = os.getenv("FF_PROFILE_FOLDER")
-LOCAL_DOWNLOAD = os.getenv("CHROME_DOWNLOAD_FOLDER")
+LOCAL_DOWNLOAD = os.getenv("LOCAL_DOWNLOAD_FOLDER")
 
 
-def get_driver():
+def get_chrome_driver():
     opts = webdriver.ChromeOptions()
-    opts.add_argument(f"user-data-dir={LOCAL_CHROME_PROFILE}")
+    opts.add_argument(f"user-data-dir=" + os.getenv("CHROME_PROFILE_FOLDER"))
     opts.add_argument("start-maximized")
-    #opts.add_argument("headless")
+    if os.getenv("SELENIUM_HEADLESS") == "1":
+        opts.add_argument("headless")
+
     return webdriver.Chrome(options = opts)
 
-def get_ff_driver():
+def get_firefox_driver():
     opts = webdriver.FirefoxOptions()
     opts.add_argument('-profile')
-    opts.add_argument(LOCAL_FF_PROFILE)
-    opts.add_argument("-headless")
-    opts.add_argument("--headless")
-    opts.headless = True
+    opts.add_argument(os.getenv("FIREFOX_PROFILE_FOLDER"))
+    if os.getenv("SELENIUM_HEADLESS") == "1":
+        opts.add_argument("-headless")
+        opts.headless = True
+        
     return webdriver.Firefox(options=opts)
 
 
@@ -53,7 +54,10 @@ def gen_podcast(URL:str) ->str:
     # generate podcast
     # wait until podcast is generated
     # download podcast
-    driver = get_ff_driver()
+    if os.getenv("SELENIUM_BROWSER") == "firefox":
+        driver = get_firefox_driver()
+    else:
+        driver = get_chrome_driver()
     try:
         print("(1) Open Notebooklm")
         step1_open_notebooklm(driver)
@@ -112,20 +116,16 @@ def step3_add_website(driver, URL):
     elem_url.send_keys(URL)
     time.sleep(2)
     elem_url.send_keys(Keys.RETURN)
-    #driver.find_element(By.CLASS_NAME,"mat-mdc-button-base").click()
 
 
 def step4_wait_source_processing(driver):
     wait = WebDriverWait(driver, 360)
     wait.until(EC.visibility_of_element_located((By.CLASS_NAME, 'customize-button')))
-
-    #when source is imported, this automatically pops up.
-    #elem_guide_btn = driver.find_element(By.CLASS_NAME, "notebook-guide-button")
-    #elem_guide_btn.click()
+    time.sleep(25)
 
 
 def step5_customize_podcast(driver):
-    time.sleep(20)
+    
     elem_customize = driver.find_element(By.CLASS_NAME, "customize-button")
     elem_customize.click()
 
@@ -165,7 +165,11 @@ def process():
         #found one..
         print("Generate podcast for " + item["title"])
         if "url" not in item:
-            url = wiki.get_wiki_url(item["title"])
+            try:
+                url = wiki.get_wiki_url(item["title"])
+            except:
+                print("could not find wiki url, try guessing...")
+                url = wiki.guess_wiki_url(item["title"])
         else:
             url = item["url"]
         wavefile = gen_podcast(url)
@@ -175,11 +179,12 @@ def process():
 
         item["folder"] = utils.build_folder_name(item["title"])
         utils.create_folder(item['folder'])
-        shutil.move(os.path.join(os.getenv("CHROME_DOWNLOAD_FOLDER"), wavefile), os.path.join(item["folder"], "podcast.wav"))
+        shutil.move(os.path.join(os.getenv("LOCAL_DOWNLOAD_FOLDER"), wavefile), os.path.join(item["folder"], "podcast.wav"))
         
         md = dict()
         md["category"] = item["category"]
         md["wiki_title"] = item["title"]
+        md["pageid"] = wiki.get_page_id(url)
 
         utils.toFile(md, os.path.join(item["folder"], "metadata.json"))
         utils.toFile(db, "database.json")
@@ -190,4 +195,4 @@ def process():
 if __name__ == "__main__":
     while(True):
         process()
-        time.sleep(2*60)
+        #time.sleep(2*60)
