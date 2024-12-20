@@ -37,15 +37,15 @@ def build_folder_name(topic: str) -> str:
 
 
 def fromJSON(json: str) -> dict:
-    return json.loads(json)
+  return json.loads(json)
 
 def fromFile(filename: str) -> dict:
-    with open(filename, 'r') as f:
-        return json.load(f)
+  with open(filename, 'r') as f:
+    return json.load(f)
 
 def toJSON(md: dict) -> str:
-    return json.dumps(md, ensure_ascii=False, indent=4)
+  return json.dumps(md, ensure_ascii=False, indent=4)
 
 def toFile(md: dict, filename: str) -> None:
-    with open(filename, 'w', encoding='utf-8') as f:
-        json.dump(md, f, ensure_ascii=False, indent=4)
+  with open(filename, 'w', encoding='utf-8') as f:
+    json.dump(md, f, ensure_ascii=False, indent=4)

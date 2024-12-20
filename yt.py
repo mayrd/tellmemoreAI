@@ -9,6 +9,7 @@ import sys
 import time
 import dotenv
 
+import googleapiclient
 from apiclient.discovery import build
 from apiclient.errors import HttpError
 from apiclient.http import MediaFileUpload
@@ -27,7 +28,11 @@ RETRIABLE_EXCEPTIONS = (httplib2.HttpLib2Error, IOError, httplib.NotConnected,
 RETRIABLE_STATUS_CODES = [500, 502, 503, 504]
 
 CLIENT_SECRETS_FILE = os.getenv("YT_CLIENT_SECRETS")
-YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+YOUTUBE_SCOPES = [
+  "https://www.googleapis.com/auth/youtube.force-ssl",
+  "https://www.googleapis.com/auth/youtube.upload",
+  "https://www.googleapis.com/auth/youtube.readonly"
+  ]
 YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
 
@@ -49,19 +54,19 @@ https://developers.google.com/api-client-library/python/guide/aaa_client_secrets
 
 VALID_PRIVACY_STATUSES = ("public", "private", "unlisted")
 
-
 class Options:
-    pass
+  pass
 
-def get_authenticated_service(args):
+def get_authenticated_service():
   flow = flow_from_clientsecrets(CLIENT_SECRETS_FILE,
-    scope=YOUTUBE_UPLOAD_SCOPE,
+    scope=YOUTUBE_SCOPES,
     message=MISSING_CLIENT_SECRETS_MESSAGE)
 
   storage = Storage("%s-oauth2.json" % sys.argv[0])
   credentials = storage.get()
 
   if credentials is None or credentials.invalid:
+    args = Options()
     args.logging_level = "WARNING"
     args.noauth_local_webserver = True
     credentials = run_flow(flow, storage, args)
@@ -130,7 +135,7 @@ def upload_video(video_file: str, title: str, description: str, tags: list[str])
   options.description = description
   options.tags = tags
   options.privacyStatus = "private"
-  youtube = get_authenticated_service(options)
+  youtube = get_authenticated_service()
   try:
     return initialize_upload(youtube, options)
   except HttpError as e:
@@ -139,7 +144,7 @@ def upload_video(video_file: str, title: str, description: str, tags: list[str])
 
 
 def set_thumbnail(video_id: str, thumbnail_file: str) -> bool:
-  youtube = get_authenticated_service(dict())
+  youtube = get_authenticated_service()
   try:
     with open(thumbnail_file, 'rb') as f:
       response = youtube.thumbnails().set(
@@ -155,7 +160,7 @@ def set_thumbnail(video_id: str, thumbnail_file: str) -> bool:
 def is_video_in_playlist(playlist_id: str, video_id: str) -> bool:
   """Checks if a video is already in a playlist."""
   try:
-    youtube = get_authenticated_service(dict())
+    youtube = get_authenticated_service()
     request = youtube.playlistItems().list(
       part="snippet",
       playlistId=playlist_id,
@@ -168,11 +173,11 @@ def is_video_in_playlist(playlist_id: str, video_id: str) -> bool:
     return False
 
 
-def add_video_to_playlist(playlist_id, video_id):
+def add_video_to_playlist(playlist_id, video_id) -> bool:
   """Adds a video to a playlist if it's not already there."""
   if not is_video_in_playlist(playlist_id, video_id):
     try:
-      youtube = get_authenticated_service(dict())
+      youtube = get_authenticated_service()
       request = youtube.playlistItems().insert(
         part="snippet",
         body={
@@ -187,35 +192,10 @@ def add_video_to_playlist(playlist_id, video_id):
       )
       request.execute()
       print(f"Video {video_id} added to playlist {playlist_id}")
+      return True
     except googleapiclient.errors.HttpError as e:
       print(f"An HTTP error {e.resp.status} occurred:\n{e.content}")
+      return False
   else:
     print(f"Video {video_id} is already in playlist {playlist_id}")
-
-
-def main():
-  argparser.add_argument("--file", required=True, help="Video file to upload")
-  argparser.add_argument("--title", help="Video title", default="Test Title")
-  argparser.add_argument("--description", help="Video description",
-    default="Test Description")
-  argparser.add_argument("--category", default="22",
-    help="Numeric video category. " +
-      "See https://developers.google.com/youtube/v3/docs/videoCategories/list")
-  argparser.add_argument("--keywords", help="Video keywords, comma separated",
-    default="")
-  argparser.add_argument("--privacyStatus", choices=VALID_PRIVACY_STATUSES,
-    default=VALID_PRIVACY_STATUSES[0], help="Video privacy status.")
-  args = argparser.parse_args()
-
-  if not os.path.exists(args.file):
-    exit("Please specify a valid file using the --file= parameter.")
-
-  youtube = get_authenticated_service(args)
-  try:
-    initialize_upload(youtube, args)
-  except HttpError as e:
-    print("An HTTP error %d occurred:\n%s" % (e.resp.status, e.content))
-
-
-if __name__ == '__main__':
-  main()
+    return True
