@@ -119,6 +119,8 @@ def schedule(video_id: str, category: str) -> datetime.datetime:
         if item["title"] == category:
             try:
                 latest_pub = yt.get_latest_scheduled_publish_time(item["playlistId"])
+                if latest_pub is None:
+                    latest_pub = datetime.datetime.now()
                 next_pub = latest_pub + datetime.timedelta(days=1)
                 yt.schedule_video(video_id, next_pub)
                 return next_pub
@@ -136,7 +138,10 @@ def print_last_pubs():
     playlists = utils.fromFile("ytplaylists.json")
     for item in playlists["list"]:
         latest_pub = yt.get_latest_scheduled_publish_time(item["playlistId"])
-        print(item["title"] + ": "+ latest_pub.isoformat())
+        if latest_pub is None:
+            print(item["title"] + ": nothing scheduled")
+        else:
+            print(item["title"] + ": "+ latest_pub.isoformat())
 
 
 def podcast2video(folder_name: str) -> bool:

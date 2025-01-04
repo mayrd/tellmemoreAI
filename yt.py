@@ -238,7 +238,6 @@ def get_latest_scheduled_publish_time(playlist_id: str) -> datetime.datetime:
       latest_scheduled_time = max(scheduled_times)
       return datetime.datetime.fromisoformat(latest_scheduled_time)
     else:
-      print("No scheduled videos found in the playlist.")
       return None
 
   except Exception as e:
