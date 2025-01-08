@@ -51,7 +51,7 @@ def imagen(prompt: str) -> str:
     #TODO does not work
     google.generativeai.configure(api_key=GOOGLE_CLOUD_API_KEY)
     client = google.generativeai.ImageGenerationModel("imagen-3.0-generate-001")
-    print(google.generativeai.models.list())
+    #print(google.generativeai.models.list())
     response = client.generate_images(
         prompt=prompt,
         number_of_images=1,
