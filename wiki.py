@@ -49,6 +49,8 @@ def get_page_id(url):
         print(f"An unexpected error occurred: {e}")
         return None
 
+def get_page_by_title(title: str) -> wikipedia.page:
+    return wikipedia.page(title)
 
 def get_wiki_url(title: str) -> str:
     page = wikipedia.page(title)
@@ -76,7 +78,7 @@ def fetch_wiki_article(title: str) -> str:
 
     return content
 
-def get_page_by_id(pageid: str)->str:
+def get_page_by_id(pageid: str) -> wikipedia.page:
     try:
         page = wikipedia.page(pageid=pageid)
         return page
