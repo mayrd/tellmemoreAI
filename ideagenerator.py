@@ -13,9 +13,11 @@ import dotenv
 
 dotenv.load_dotenv()
 
-def gather_wiki_urls(category) -> list:
+def gather_wiki_urls(category: str) -> list:
+    return list(set(_gather_wiki_urls_from_md_json(category) + _gather_wiki_urls_from_database_json(category)))
+
+def _gather_wiki_urls_from_md_json(category: str) -> list:
     # take the ones from metadata.json in output folder
-    # (TODO)append the ones from database.json which are queued
     urls = []
     folders = utils.get_subfolders(os.getenv("OUTPUT_FOLDER"))
     for folder in folders:
@@ -24,7 +26,7 @@ def gather_wiki_urls(category) -> list:
             md_file = os.path.join(folder, "metadata.json")
             if os.path.exists(md_file):
                 md = utils.fromFile(md_file)
-                if md['category'] == category:
+                if md['category'] != category:
                     continue
                 if 'pageid' in md:
                     page = wiki.get_page_by_id(md['pageid'])
@@ -36,7 +38,27 @@ def gather_wiki_urls(category) -> list:
             print(e)
     return urls
 
-def gen_next_video_url(category, description, used_urls):
+def _gather_wiki_urls_from_database_json(category: str):
+    # read urls from database.json
+    urls = []
+    db = utils.fromFile("database.json")
+    for item in db["list"]:
+        if item['category'] != category:
+            continue
+        urls.append(item['url'])
+    return urls
+
+def append_to_database_json(category: str, title: str, url: str):
+    db = utils.fromFile("database.json")
+    db["list"].append({
+        "category": category,
+        "title": title,
+        "url": url
+    })
+    utils.toFile(db, "database.json")
+
+
+def gen_next_video_url(category: str, description: str, used_urls: list) -> str:
     response = genai.gemini(
         f"We created podcast called \"{category}\". {description} "
         f"Can you find one english wikipedia article which could be the base for the next episode of the podcast? "
@@ -53,5 +75,8 @@ if __name__ == "__main__":
     playlists = utils.fromFile("ytplaylists.json")
     for playlist in playlists["list"]:
         urls_used = gather_wiki_urls(playlist["title"])
+        print(urls_used)
         print(playlist["title"])
-        print(gen_next_video_url(playlist["title"], playlist["short_description"], urls_used))
+        next_url = gen_next_video_url(playlist["title"], playlist["short_description"], urls_used)
+        print(next_url)
+        append_to_database_json(playlist["title"], next_url.replace("https://en.wikipedia.org/wiki/",""), next_url)
