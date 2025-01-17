@@ -154,46 +154,53 @@ def step7_download_podcast(driver):
     driver.find_element(By.CSS_SELECTOR,"a.mat-mdc-menu-item.mat-focus-indicator").click()
 
 
+def get_wiki_url(db_list_item) -> str:
+    if "url" not in db_list_item:
+        try:
+            return wiki.get_wiki_url(db_list_item["title"])
+        except:
+            print("could not find wiki url, try guessing...")
+            return wiki.guess_wiki_url(db_list_item["title"])
+    else:
+        return db_list_item["url"]
+
+
 def process():
-    # find first to gen_podcast
-    # when done, store database.json and then restart (do not continue)
+    # traverse db and generate podcasts for items not created yet
     db = utils.fromFile("database.json")
     for item in db["list"]:
         print(f"checking {item}")
         if "folder" in item:
+            # means it is already generated
             continue
 
-        #found one..
+        # found item to generate podcast for
         print("Generate podcast for " + item["title"])
-        if "url" not in item:
-            try:
-                url = wiki.get_wiki_url(item["title"])
-            except:
-                print("could not find wiki url, try guessing...")
-                url = wiki.guess_wiki_url(item["title"])
-        else:
-            url = item["url"]
+        url = get_wiki_url(item)
         wavefile = gen_podcast(url)
         if not wavefile:
             print("hmm, wavefile not generated, continue with something else")
             continue
 
+        # create folder in OUTPUT_FOLDER and move podcast.wav from LOCAL_DOWNLOAD_FOLDER there
         item["folder"] = utils.build_folder_name(item["title"])
         utils.create_folder(item['folder'])
         shutil.move(os.path.join(os.getenv("LOCAL_DOWNLOAD_FOLDER"), wavefile), os.path.join(item["folder"], "podcast.wav"))
         
+        # create metadata.json
         md = dict()
         md["category"] = item["category"]
         md["wiki_title"] = item["title"]
         md["pageid"] = wiki.get_page_id(url)
-
         utils.toFile(md, os.path.join(item["folder"], "metadata.json"))
-        utils.toFile(db, "database.json")
-        print(f"Done with {item}")
-        return
 
+        # update db file
+        utils.toFile(db, "database.json")
+
+        print(f"Done with {item}")
+    
+    # end when a full loop through db has been made
+    return
 
 if __name__ == "__main__":
-    while(True):
-        process()
-        #time.sleep(2*60)
+    process()
