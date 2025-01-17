@@ -74,9 +74,14 @@ if __name__ == "__main__":
 
     playlists = utils.fromFile("ytplaylists.json")
     for playlist in playlists["list"]:
+        if playlist["active"] is not True:
+            continue
+
         urls_used = gather_wiki_urls(playlist["title"])
         print(urls_used)
         print(playlist["title"])
-        next_url = gen_next_video_url(playlist["title"], playlist["short_description"], urls_used)
-        print(next_url)
-        append_to_database_json(playlist["title"], next_url.replace("https://en.wikipedia.org/wiki/",""), next_url)
+        for i in range(3):
+            next_url = gen_next_video_url(playlist["title"], playlist["short_description"], urls_used)
+            print(next_url)
+            append_to_database_json(playlist["title"], next_url.replace("https://en.wikipedia.org/wiki/",""), next_url)
+            urls_used.append(next_url)
