@@ -7,6 +7,7 @@ google_service_account.json
 database.json
 podcasts/
 ytplaylists.json
+.vscode/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
