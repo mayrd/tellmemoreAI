@@ -78,7 +78,6 @@ if __name__ == "__main__":
             continue
 
         urls_used = gather_wiki_urls(playlist["title"])
-        print(urls_used)
         print(playlist["title"])
         for i in range(3):
             next_url = gen_next_video_url(playlist["title"], playlist["short_description"], urls_used)
