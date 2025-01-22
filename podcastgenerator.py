@@ -203,4 +203,6 @@ def process():
     return
 
 if __name__ == "__main__":
-    process()
+    while True:
+        process()
+        time.sleep(21600)
