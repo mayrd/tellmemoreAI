@@ -3,7 +3,7 @@ list.txt
 chromedriver.exe
 client_secrets.json
 google_service_account.json
-*.py-oauth2.json
+*-oauth2.json
 database.json
 podcasts/
 ytplaylists.json
