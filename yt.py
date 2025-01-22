@@ -63,7 +63,7 @@ def get_authenticated_service():
     scope=YOUTUBE_SCOPES,
     message=MISSING_CLIENT_SECRETS_MESSAGE)
 
-  storage = Storage("%s-oauth2.json" % sys.argv[0])
+  storage = Storage("tellmemoreai-oauth2.json")
   credentials = storage.get()
 
   if credentials is None or credentials.invalid:
