@@ -1,26 +1,27 @@
 #!/bin/python3
 
 import os
+import sys
+import vertexai
 import google.genai
 import google.generativeai
 from openai import OpenAI
+from vertexai.preview.vision_models import ImageGenerationModel
 import dotenv
+import google.auth
+from google.cloud import aiplatform
 
 dotenv.load_dotenv()
 
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-MODEL = os.getenv("OPENAI_TEXT_MODEL")
-MODEL_IMAGE = os.getenv("OPENAI_IMAGE_MODEL")
 
-GOOGLE_CLOUD_API_KEY = os.getenv("GOOGLE_CLOUD_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL")
+## openAI methods
 
 
 def openai(prompt: str) -> str:
     try:
-        client = OpenAI(api_key=OPENAI_KEY)
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         response = client.chat.completions.create(
-            model=MODEL,
+            model=os.getenv("OPENAI_TEXT_MODEL"),
             messages=[{"role": "user", "content": prompt}]
         )
         return response.choices[0].message.content
@@ -29,9 +30,9 @@ def openai(prompt: str) -> str:
 
 
 def openai_image(prompt: str) -> str:
-    client = OpenAI(api_key=OPENAI_KEY)
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     response = client.images.generate(
-        model=MODEL_IMAGE,
+        model=os.getenv("OPENAI_IMAGE_MODEL"),
         prompt=prompt,
         size="1792x1024",
         quality="standard",
@@ -40,27 +41,49 @@ def openai_image(prompt: str) -> str:
     return response.data[0].url
 
 
+## google (gemini, vertexAI, imagen) methods
+
+
 # https://ai.google.dev/gemini-api/docs/models/gemini-v2
 def gemini(prompt: str) -> str:
-    client = google.genai.Client(api_key=GOOGLE_CLOUD_API_KEY)
-    response = client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+    client = google.genai.Client(api_key=os.getenv("GOOGLE_CLOUD_API_KEY"))
+    response = client.models.generate_content(model=os.getenv("GEMINI_MODEL"), contents=prompt)
     return response.text
 
-#https://ai.google.dev/gemini-api/docs/imagen?hl=en
-def imagen(prompt: str) -> str:
-    #TODO does not work
-    google.generativeai.configure(api_key=GOOGLE_CLOUD_API_KEY)
-    client = google.generativeai.ImageGenerationModel("imagen-3.0-generate-001")
-    #print(google.generativeai.models.list())
-    response = client.generate_images(
+
+def _get_google_credentials():
+    if os.getenv("GOOGLE_SERVICE_ACCOUNT"):
+        credentials, project = google.auth.load_credentials_from_file(os.getenv("GOOGLE_SERVICE_ACCOUNT"))
+        return credentials
+    else:
+        credentials, project = google.auth.default()
+
+    if not credentials.valid:
+        if credentials.expired:
+            credentials.refresh(google.auth.transport.requests.Request())
+        else:
+            raise ValueError("Credentials are not valid. Check your environment configuration.")
+    return credentials
+
+
+def imagen3(prompt: str) -> str:
+    vertexai.init(credentials=_get_google_credentials())
+    generation_model = ImageGenerationModel.from_pretrained(os.getenv("IMAGEN_MODEL"))
+
+    images = generation_model.generate_images(
         prompt=prompt,
         number_of_images=1,
+        aspect_ratio="16:9",
         safety_filter_level="block_only_high",
-        person_generation="allow_all",
-        aspect_ratio="3:4",
+        person_generation="allow_adult",
     )
-    return response
-    #response.generated_images[0].image.show()
+
+    output_file = "generated.jpg"
+    images[0].save(location=output_file, include_generation_parameters=False)
+    return output_file
+
+
+### generic methods
 
 
 def genai_text(prompt: str) -> str:
@@ -78,6 +101,34 @@ def genai_image(prompt: str) -> str:
         return openai_image(prompt)
     return imagen(prompt)
 
+def genai_image_expanded(prompt: str) -> str:
+    return genai_image(expand_image_prompt(prompt))
+
+
+## helper methods
+
+def expand_image_prompt(prompt: str) -> str:
+  expanded_prompt = """
+Write a prompt for a text-to-image model following the style of the examples of prompts, and then I will give you a prompt that I want you to rewrite.
+Examples of prompts
+A close-up of a sleek Siamese cat perched regally, in front of a deep purple background, in a high-resolution photograph with fine details and color grading.
+Flat vector illustration of "Breathe deep" hand-lettering with floral and leaf decorations. Bright colors, simple lines, and a cute, minimalist design on a white background.
+Long exposure photograph of rocks and sea, long shot of cloudy skies, golden hour at the rocky shore with reflections in the water. High resolution.
+Three women stand together laughing, with one woman slightly out of focus in the foreground. The sun is setting behind the women, creating a lens flare and a warm glow that highlights their hair and creates a bokeh effect in the background. The photography style is candid and captures a genuine moment of connection and happiness between friends. The warm light of golden hour lends a nostalgic and intimate feel to the image.
+A group of five friends are standing together outdoors with tall gray mountains in the background. One woman is wearing a black and white striped top and is laughing with her hand on her mouth. The man next to her is wearing a blue and green plaid shirt, khaki shorts, and a camera around his neck, he is laughing and has his arm around another man who is bent over laughing wearing a gray shirt and black pants with a camera around his neck. Behind them, a blonde woman with sunglasses on her head and wearing a beige top and red backpack is laughing and pushing the man in the gray shirt.
+An elderly woman with gray hair is sitting on a park bench next to a medium-sized brown and white dog, with the sun setting behind them, creating a warm orange glow and lens flare. She is wearing a straw sun hat and a pink patterned jacket and has a peaceful expression as she looks off into the distance.
+A woman with blonde hair wearing sunglasses stands amidst a dazzling display of golden bokeh lights. Strands of lights and crystals partially obscure her face, and her sunglasses reflect the lights. The light is low and warm creating a festive atmosphere and the bright reflections in her glasses and the bokeh. This is a lifestyle portrait with elements of fashion photography.
+A closeup of an intricate, dew-covered flower in the rain. The focus is on the delicate petals and water droplets, capturing their soft pastel colors against a dark blue background. Shot from eye level using natural light to highlight the floral texture and dew's glistening effect. This image conveys the serene beauty found within nature's miniature worlds in the style of realist details
+A closeup of a pair of worn hands, wrinkled and weathered, gently cupping a freshly baked loaf of bread. The focus is on the contrast between the rough hands and the soft dough, with flour dusting the scene. Warm light creates a sense of nourishment and tradition in the style of realistic details
+A Dalmatian dog in front of a pink background in a full body dynamic pose shot with high resolution photography and fine details isolated on a plain stock photo with color grading in the style of a hyper realistic style
+A massive spaceship floating above an industrial city, with the lights of thousands of buildings glowing in the dusk. The atmosphere is dark and mysterious, in the cyberpunk style, and cinematic
+An architectural photograph of an interior space made from interwoven, organic forms and structures inspired in the style of coral reefs and patterned textures. The scene is bathed in the warm glow of natural light, creating intricate shadows that accentuate the fluidity and harmony between the different elements within the design
+Prompt to rewrite
+'{PROMPT}'
+Don’t generate images, just reply with the prompt.
+"""
+  return text2text(expanded_prompt.replace("{PROMPT}", prompt))
+
 
 if __name__ == "__main__":
-    print(imagen("Write a cool welcome message for a geek"))
+    print(genai_image('A watercolor illustration of a group of elderly men, with mischievous expressions, huddled around a table with tools and a map, bathed in a dramatic red light. The background subtly hints at a jewelry vault, with broken locks and scattered jewels. The scene captures the audacious planning of a heist, with a handwritten title card at the top that says "Hatton Garden Heist" in a vintage, slightly uneven font, reminiscent of old crime novel covers. The style is evocative, with blurred edges and vibrant washes of red, capturing the clandestine nature of the operation, suitable for a podcast episode cover.'))
