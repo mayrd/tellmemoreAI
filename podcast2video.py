@@ -49,13 +49,25 @@ def gen_yt_tags(wiki_article: str) -> list[str]:
         arr = arr[:20]
     return arr
     
-def gen_thumbnail(yt_description: str, title: str, subtitle: str, filename: str) -> None:
-    url = genai.genai_image(
+def gen_thumbnail(yt_description: str, title: str, category: str, filename: str) -> None:
+    prompt_old = (
         f"We created a podcast about the happenings and this is the description. "
         f"Can you generate a thumbnail supporting the podcast? "
-        f"Add \"{title}\" as big text on the thumbnail and also add \"{subtitle}\" as text on the thumbnail. "
+        f"Add \"{title}\" as big text on the thumbnail and also add \"{category}\" as text on the thumbnail. "
         f"This is the description what the podcast is about: {yt_description}"
-        )
+    )
+    playlist = utils.get_ytplaylist(category)
+    PODCAST_COLOR = playlist['color']
+    STYLE = playlist['style']
+    prompt = (
+        f"Create an image for a podcast episode in {STYLE} style. "
+        f"Use the color {PODCAST_COLOR}, but you can still use other colors to emphasize objects. "
+        #f"Do not write text on the image. "
+        f"Add \"{title}\" as large text and also add \"{category}\". "
+        f"The episode has the title \"{title}\". "
+        f"here is the description: {yt_description}"
+    )
+    url = genai.genai_image(prompt)
     utils.download_file(url, filename + ".webp")
     media.convert(filename + ".webp", filename)
 
@@ -94,48 +106,34 @@ def gen_thumbnails(md: dict, folder_name: str)-> str:
 
 
 def add_to_playlist(videoId: str, category: str) -> bool:
-    if not os.path.isfile("ytplaylists.json"):
-        print("no ytplaylists.json, so no playlist to add item to")
-        return False
+    playlist = utils.get_ytplaylist(category)
+    try:
+        yt.add_video_to_playlist(playlist["playlistId"], videoId)
+        return True
+    except Exception as e:
+        print("could not add to playlists: "+str(e))
 
-    playlists = utils.fromFile("ytplaylists.json")
-    for item in playlists["list"]:
-        if item["title"] == category:
-            try:
-                yt.add_video_to_playlist(item["playlistId"], videoId)
-                return True
-            except Exception as e:
-                print("could not add to playlists: "+str(e))
     return False
 
 
 def schedule(video_id: str, category: str) -> datetime.datetime:
-    if not os.path.isfile("ytplaylists.json"):
-        print("no ytplaylists.json, so cannot schedule")
-        return None
+    playlist = utils.get_ytplaylist(category)
+    try:
+        latest_pub = yt.get_latest_scheduled_publish_time(item["playlistId"])
+        if latest_pub is None:
+            latest_pub = datetime.datetime.now()
+        next_pub = latest_pub + datetime.timedelta(days=1)
+        yt.schedule_video(video_id, next_pub)
+        return next_pub
+    except Exception as e:
+        print("could not schedule video: "+str(e))
 
-    playlists = utils.fromFile("ytplaylists.json")
-    for item in playlists["list"]:
-        if item["title"] == category:
-            try:
-                latest_pub = yt.get_latest_scheduled_publish_time(item["playlistId"])
-                if latest_pub is None:
-                    latest_pub = datetime.datetime.now()
-                next_pub = latest_pub + datetime.timedelta(days=1)
-                yt.schedule_video(video_id, next_pub)
-                return next_pub
-            except Exception as e:
-                print("could not schedule video: "+str(e))
     return None
 
 
 def print_last_pubs():
-    if not os.path.isfile("ytplaylists.json"):
-        print("no ytplaylists.json, so cannot schedule")
-        return None
-
     print("\nSchedules:")
-    playlists = utils.fromFile("ytplaylists.json")
+    playlists = utils.get_ytplaylists()
     for item in playlists["list"]:
         latest_pub = yt.get_latest_scheduled_publish_time(item["playlistId"])
         if latest_pub is None:

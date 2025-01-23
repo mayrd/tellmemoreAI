@@ -68,11 +68,7 @@ def gen_next_video_url(category: str, description: str, used_urls: list) -> str:
     return response
 
 if __name__ == "__main__":
-    if not os.path.isfile("ytplaylists.json"):
-        print("no ytplaylists.json, so no playlist to traverse")
-        exit(1)
-
-    playlists = utils.fromFile("ytplaylists.json")
+    playlists = utils.get_ytplaylists()
     for playlist in playlists["list"]:
         if playlist["active"] is not True:
             continue

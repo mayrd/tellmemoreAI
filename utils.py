@@ -49,3 +49,20 @@ def toJSON(md: dict) -> str:
 def toFile(md: dict, filename: str) -> None:
   with open(filename, 'w', encoding='utf-8') as f:
     json.dump(md, f, ensure_ascii=False, indent=4)
+
+
+## methods for ytplaylists.json
+
+def get_ytplaylists():
+  if not os.path.isfile("ytplaylists.json"):
+    print("no ytplaylists.json")
+    return None
+
+  return utils.fromFile("ytplaylists.json")  
+
+def get_ytplaylist(category: str):
+  playlists = get_ytplaylists()
+  for item in playlists["list"]:
+    if item["title"] == category:
+      return item
+  return None
