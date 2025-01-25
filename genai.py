@@ -125,10 +125,13 @@ A massive spaceship floating above an industrial city, with the lights of thousa
 An architectural photograph of an interior space made from interwoven, organic forms and structures inspired in the style of coral reefs and patterned textures. The scene is bathed in the warm glow of natural light, creating intricate shadows that accentuate the fluidity and harmony between the different elements within the design
 Prompt to rewrite
 '{PROMPT}'
-Don’t generate images, just reply with the prompt.
+Don't generate images, just reply with the prompt.
 """
   return text2text(expanded_prompt.replace("{PROMPT}", prompt))
 
 
 if __name__ == "__main__":
-    print(genai_image('A watercolor illustration of a group of elderly men, with mischievous expressions, huddled around a table with tools and a map, bathed in a dramatic red light. The background subtly hints at a jewelry vault, with broken locks and scattered jewels. The scene captures the audacious planning of a heist, with a handwritten title card at the top that says "Hatton Garden Heist" in a vintage, slightly uneven font, reminiscent of old crime novel covers. The style is evocative, with blurred edges and vibrant washes of red, capturing the clandestine nature of the operation, suitable for a podcast episode cover.'))
+    PROMPT=(
+        "A girl in a red dress."
+    )
+    print(genai_image(PROMPT))
