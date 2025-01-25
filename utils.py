@@ -58,7 +58,7 @@ def get_ytplaylists():
     print("no ytplaylists.json")
     return None
 
-  return utils.fromFile("ytplaylists.json")  
+  return fromFile("ytplaylists.json")  
 
 def get_ytplaylist(category: str):
   playlists = get_ytplaylists()
