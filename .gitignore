@@ -6,6 +6,7 @@ google_service_account.json
 *-oauth2.json
 database.json
 podcasts/
+fonts/
 ytplaylists.json
 .vscode/
 
