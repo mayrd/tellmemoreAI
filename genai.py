@@ -142,7 +142,7 @@ Prompt to rewrite
 '{PROMPT}'
 Don't generate images, just reply with the prompt.
 """
-  return gemini(expanded_prompt.replace("{PROMPT}", prompt))
+  return genai_text(expanded_prompt.replace("{PROMPT}", prompt))
 
 
 if __name__ == "__main__":
