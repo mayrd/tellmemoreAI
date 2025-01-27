@@ -104,12 +104,6 @@ def genai_text(prompt: str) -> str:
         return openai(prompt).strip()
     return gemini(prompt).strip()
 
-
-def genai_summarize(text: str) -> str:
-    """takes text and summarizes it. """
-    return genai_text("Please summarize the following and only reply with the summary: "+text).strip()
-
-
 def genai_image(prompt: str) -> str:
     """takes takes text and generates image and replies with tempfile in jpg."""
     if(os.getenv("GENERATE_IMAGE") == "OPENAI"):
@@ -120,7 +114,11 @@ def genai_image_expanded(prompt: str) -> str:
     return genai_image(expand_image_prompt(prompt))
 
 
-## helper methods
+## prompt helper methods
+
+def genai_summarize(text: str) -> str:
+    """takes text and summarizes it. """
+    return genai_text("Please summarize the following and only reply with the summary: "+text).strip()
 
 def expand_image_prompt(prompt: str) -> str:
   expanded_prompt = """
