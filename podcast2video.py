@@ -27,7 +27,7 @@ def gen_yt_title(wiki_article: str) -> str:
 
 def gen_short_title(wiki_article: str) -> str:
         return genai.genai_text(
-        f"We need a short title for, only reply with the short title: {wiki_article}"
+        f"We need a short title in 1-3 words and only reply with the short title for: {wiki_article}"
     ).replace("\"", "").strip()
 
 def gen_yt_description(wiki_article: str) -> str:
@@ -54,11 +54,11 @@ def gen_yt_tags(wiki_article: str) -> list[str]:
         arr = arr[:20]
     return arr
     
-def gen_thumbnail(yt_description: str, title: str, category: str, filename: str) -> None:
+def gen_thumbnail(yt_description: str, short_title: str, category: str, filename: str) -> None:
     prompt_old = (
         f"We created a podcast about the happenings and this is the description. "
         f"Can you generate a thumbnail supporting the podcast? "
-        f"Add \"{title}\" as big text on the thumbnail and also add \"{category}\" as text on the thumbnail. "
+        f"Add \"{short_title}\" as big text on the thumbnail and also add \"{category}\" as text on the thumbnail. "
         f"This is the description what the podcast is about: {yt_description}"
     )
     playlist = utils.get_ytplaylist(category)
@@ -68,17 +68,18 @@ def gen_thumbnail(yt_description: str, title: str, category: str, filename: str)
         f"Create an image for a podcast episode in {style} style. "
         f"Use the color {podcast_color}, but you can still use other colors to emphasize objects. "
         f"Do not write text on the image. "
+        f"The image should be full size, no blanks or borders. "
         #f"Add \"{title}\" as large text and also add \"{category}\". " # does not work, write mechanical instead
-        f"The episode has the title \"{title}\". "
+        f"The episode has the title \"{short_title}\". "
         f"here is the description: {yt_description}"
     )
     expanded_prompt = genai.expand_image_prompt(prompt)
     image = genai.genai_image(expanded_prompt)
 
-    short_title = genai.genai_text(f"Provide a very short title, only 1-3 words for \"{title}\". Only reply the short title.")
-    print(short_title)
-    media.image_add_text(image, category, os.path.join("fonts", playlist['font_file']), 180, 0, 0, border_width=2)
-    media.image_add_text_centered(image, short_title, os.path.join("fonts", playlist['font_file']), 200, border_width=2)
+    if category == "True Crime":
+        category = "True Crime & Desasters"
+    media.image_add_text(image, category, os.path.join("fonts", playlist['font_file']), playlist['font_size_title'], 10, 0, border_width=2)
+    media.image_add_text_centered(image, short_title, os.path.join("fonts", playlist['font_file']), playlist['font_size_episode'], offset_y=playlist['font_size_episode_offset_y'], border_width=2)
     shutil.move(image, filename)
 
 
@@ -129,7 +130,7 @@ def add_to_playlist(videoId: str, category: str) -> bool:
 def schedule(video_id: str, category: str) -> datetime.datetime:
     playlist = utils.get_ytplaylist(category)
     try:
-        latest_pub = yt.get_latest_scheduled_publish_time(item["playlistId"])
+        latest_pub = yt.get_latest_scheduled_publish_time(playlist["playlistId"])
         if latest_pub is None:
             latest_pub = datetime.datetime.now()
         next_pub = latest_pub + datetime.timedelta(days=1)
@@ -203,7 +204,6 @@ def podcast2video(folder_name: str, pause_for_review: bool = False) -> bool:
 
 if __name__ == "__main__":
     PAUSE_FOR_REVIEW = False
-    print(sys.argv)
     if len(sys.argv)>1 and sys.argv[1] == "review":
         PAUSE_FOR_REVIEW = True
 
