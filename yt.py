@@ -147,12 +147,12 @@ def upload_video(video_file: str, title: str, description: str, tags: list[str])
 def set_thumbnail(video_id: str, thumbnail_file: str) -> bool:
   youtube = get_authenticated_service()
   try:
-    with open(thumbnail_file, 'rb') as f:
-      response = youtube.thumbnails().set(
-          videoId=video_id,
-          media_body=f,
-          media_mime_type='image/jpeg'
-      ).execute()
+    media_body = MediaFileUpload(thumbnail_file)
+    #media_body.mimetype = 'image/jpeg'
+    response = youtube.thumbnails().set(
+        videoId=video_id,
+        media_body=media_body
+    ).execute()
   except HttpError as e:
     print("An HTTP error %d occurred:\n%s" % (e.resp.status, e.content))
   return False
@@ -265,33 +265,10 @@ def schedule_video(video_id: str, publish_at: datetime.datetime) -> bool:
 
 
 def get_video_metadata(video_id: str):
-  youtube = build("youtube", "v3", developerKey=API_KEY)
+  youtube = get_authenticated_service()
   request = youtube.videos().list(
       part="snippet,contentDetails",
       id=video_id
   )
-  return request.execute()
-
-
-def optimize_video_metadata(video_id: str):
-  response = get_video_metadata(video_id)
-  if response and 'items' in response and len(response['items']) > 0:
-    video_details = response['items'][0]
-
-    snippet = video_details.get("snippet", {})
-    title = snippet.get("title", "N/A")
-    description = snippet.get("description", "N/A")
-    channel_title = snippet.get("channelTitle", "N/A")
-
-    result = dict()
-    result['title'] = "TODO"
-    result['description'] = "TODO"
-    return result
-
-    print(propose_title(title, description, channel_title))
-    print(propose_desc(description, title, channel_title))
-  else:
-    print(f"No video found for ID: {VIDEO_ID}")
-    if 'error' in response:
-        print("Error details:", response['error'])
-    return None
+  response = request.execute()
+  return response['items'][0]
