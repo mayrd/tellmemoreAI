@@ -2,7 +2,10 @@
 # needs to run on linux
 
 import os
+import shutil
+import sys
 import datetime
+import time
 # own modules
 import genai
 import wiki
@@ -24,14 +27,15 @@ def gen_yt_title(wiki_article: str) -> str:
 
 def gen_short_title(wiki_article: str) -> str:
         return genai.genai_text(
-        f"We need a short title for: {wiki_article}"
-    ).replace("\"", "")
+        f"We need a short title for, only reply with the short title: {wiki_article}"
+    ).replace("\"", "").strip()
 
 def gen_yt_description(wiki_article: str) -> str:
     response = genai.genai_text(
         f"We created a podcast about the happenings. "
         f"Can you propose a great YouTube video description for the podcast? "
         f"The description should not have more than 5000 characters. "
+        f"Only reply with the description. "
         f"This is the article content the podcast is based on: {wiki_article}"
     )
     if len(response) < 5000:
@@ -42,6 +46,7 @@ def gen_yt_tags(wiki_article: str) -> list[str]:
     response = genai.genai_text(
         f"We created a podcast about the happenings. "
         f"Can you propose a great set of 20 YouTube tags for the podcast (comma-separated)? "
+        f"Only reply with the tags. "
         f"This is the article content the podcast is based on: {wiki_article}"
     )
     arr = [word.strip() for word in response.split(",")]
@@ -57,19 +62,24 @@ def gen_thumbnail(yt_description: str, title: str, category: str, filename: str)
         f"This is the description what the podcast is about: {yt_description}"
     )
     playlist = utils.get_ytplaylist(category)
-    PODCAST_COLOR = playlist['color']
-    STYLE = playlist['style']
+    podcast_color = playlist['color']
+    style = playlist['style']
     prompt = (
-        f"Create an image for a podcast episode in {STYLE} style. "
-        f"Use the color {PODCAST_COLOR}, but you can still use other colors to emphasize objects. "
-        #f"Do not write text on the image. "
-        f"Add \"{title}\" as large text and also add \"{category}\". "
+        f"Create an image for a podcast episode in {style} style. "
+        f"Use the color {podcast_color}, but you can still use other colors to emphasize objects. "
+        f"Do not write text on the image. "
+        #f"Add \"{title}\" as large text and also add \"{category}\". " # does not work, write mechanical instead
         f"The episode has the title \"{title}\". "
         f"here is the description: {yt_description}"
     )
-    url = genai.genai_image(prompt)
-    utils.download_file(url, filename + ".webp")
-    media.convert(filename + ".webp", filename)
+    expanded_prompt = genai.expand_image_prompt(prompt)
+    image = genai.genai_image(expanded_prompt)
+
+    short_title = genai.genai_text(f"Provide a very short title, only 1-3 words for \"{title}\". Only reply the short title.")
+    print(short_title)
+    media.image_add_text(image, category, os.path.join("fonts", playlist['font_file']), 180, 0, 0, border_width=2)
+    media.image_add_text_centered(image, short_title, os.path.join("fonts", playlist['font_file']), 200, border_width=2)
+    shutil.move(image, filename)
 
 
 def gen_metadata(md: dict, article: str) -> dict:
@@ -102,7 +112,7 @@ def gen_thumbnails(md: dict, folder_name: str)-> str:
         img_file = os.path.join(folder_name, f"img{i}.jpg")
         if not os.path.isfile(img_file):
             print(f"create {img_file}")
-            gen_thumbnail(md["yt_description"], md["category"], md["short_title"], img_file)
+            gen_thumbnail(md["yt_description"], md["short_title"], md["category"], img_file)
 
 
 def add_to_playlist(videoId: str, category: str) -> bool:
@@ -142,7 +152,7 @@ def print_last_pubs():
             print(item["title"] + ": "+ latest_pub.isoformat())
 
 
-def podcast2video(folder_name: str) -> bool:
+def podcast2video(folder_name: str, pause_for_review: bool = False) -> bool:
     print(f"checking {folder_name}")
     md_file = os.path.join(folder_name, "metadata.json")
     if not os.path.isfile(md_file):
@@ -172,6 +182,10 @@ def podcast2video(folder_name: str) -> bool:
         print(f"create {video_file}")
         media.podcast2video(podcast_file, os.path.join(folder_name, "img*.jpg"), video_file)
 
+    if pause_for_review:
+        print("Pause for review, before uploading. Hit Enter to continue. ")
+        input()
+
     md["yt_video_id"] = yt.upload_video(video_file, md["yt_title"], md["yt_description"], md["yt_tags"])
     if md["yt_video_id"]:
         print(f"  uploaded to YT as " + md["yt_video_id"])
@@ -188,13 +202,17 @@ def podcast2video(folder_name: str) -> bool:
 
 
 if __name__ == "__main__":
-    # go through the different folders in OUTPUT_FOLDER
+    PAUSE_FOR_REVIEW = False
+    print(sys.argv)
+    if len(sys.argv)>1 and sys.argv[1] == "review":
+        PAUSE_FOR_REVIEW = True
+
     folders = utils.get_subfolders(os.getenv("OUTPUT_FOLDER"))
     for folder in folders:
         if folder.startswith(os.path.join(os.getenv("OUTPUT_FOLDER"),"__")):
             continue
         try:
-            podcast2video(folder)
+            podcast2video(folder, PAUSE_FOR_REVIEW)
         except Exception as e:
             print(e)
 

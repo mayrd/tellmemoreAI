@@ -262,3 +262,36 @@ def schedule_video(video_id: str, publish_at: datetime.datetime) -> bool:
   except Exception as e:
     print(f"An error occurred: {e}")
     return False
+
+
+def get_video_metadata(video_id: str):
+  youtube = build("youtube", "v3", developerKey=API_KEY)
+  request = youtube.videos().list(
+      part="snippet,contentDetails",
+      id=video_id
+  )
+  return request.execute()
+
+
+def optimize_video_metadata(video_id: str):
+  response = get_video_metadata(video_id)
+  if response and 'items' in response and len(response['items']) > 0:
+    video_details = response['items'][0]
+
+    snippet = video_details.get("snippet", {})
+    title = snippet.get("title", "N/A")
+    description = snippet.get("description", "N/A")
+    channel_title = snippet.get("channelTitle", "N/A")
+
+    result = dict()
+    result['title'] = "TODO"
+    result['description'] = "TODO"
+    return result
+
+    print(propose_title(title, description, channel_title))
+    print(propose_desc(description, title, channel_title))
+  else:
+    print(f"No video found for ID: {VIDEO_ID}")
+    if 'error' in response:
+        print("Error details:", response['error'])
+    return None

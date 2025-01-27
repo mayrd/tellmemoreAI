@@ -2,20 +2,21 @@
 
 import os
 import sys
+import tempfile
+import media
+import utils
+import dotenv
 import vertexai
+import google.auth
 import google.genai
 import google.generativeai
 from openai import OpenAI
-from vertexai.preview.vision_models import ImageGenerationModel
-import dotenv
-import google.auth
 from google.cloud import aiplatform
+from vertexai.preview.vision_models import ImageGenerationModel
 
 dotenv.load_dotenv()
 
-
 ## openAI methods
-
 
 def openai(prompt: str) -> str:
     try:
@@ -26,23 +27,34 @@ def openai(prompt: str) -> str:
         )
         return response.choices[0].message.content
     except Exception as e:
-        return f"Error: {e}"
+        print(f"Error openai({prompt}): {ex}")
+        return None
 
 
 def openai_image(prompt: str) -> str:
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    response = client.images.generate(
-        model=os.getenv("OPENAI_IMAGE_MODEL"),
-        prompt=prompt,
-        size="1792x1024",
-        quality="standard",
-        n=1,
-    )
-    return response.data[0].url
+    """text to image as jpg file."""
+    try:
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        response = client.images.generate(
+            model=os.getenv("OPENAI_IMAGE_MODEL"),
+            prompt=prompt,
+            size="1792x1024",
+            quality="standard",
+            n=1,
+        )
+    except Exception as ex:
+        print(f"Error openai_image({prompt}): {ex}")
+        return None
+
+    #convert from webp to jpg and then return
+    temp_webp = tempfile.NamedTemporaryFile(suffix=".webp", delete=False)
+    utils.download_file(response.data[0].url, temp_webp.name)
+    temp_jpg = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+    media.convert(temp_webp.name, temp_jpg.name)
+    return temp_jpg.name
 
 
 ## google (gemini, vertexAI, imagen) methods
-
 
 # https://ai.google.dev/gemini-api/docs/models/gemini-v2
 def gemini(prompt: str) -> str:
@@ -78,25 +90,28 @@ def imagen3(prompt: str) -> str:
         person_generation="allow_adult",
     )
 
-    output_file = "generated.jpg"
-    images[0].save(location=output_file, include_generation_parameters=False)
-    return output_file
+    # store as tmp file as jpg and return
+    temp_jpg = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+    images[0].save(location=temp_jpg.name, include_generation_parameters=False)
+    return temp_jpg.name
 
 
 ### generic methods
 
-
 def genai_text(prompt: str) -> str:
+    """takes text prompt and replies with text. """
     if(os.getenv("GENERATE_TEXT") == "OPENAI"):
-        return openai(prompt)
-    return gemini(prompt)
+        return openai(prompt).strip()
+    return gemini(prompt).strip()
 
 
 def genai_summarize(text: str) -> str:
-    return openai("Please summarize the following: "+text)
+    """takes text and summarizes it. """
+    return genai_text("Please summarize the following and only reply with the summary: "+text).strip()
 
 
 def genai_image(prompt: str) -> str:
+    """takes takes text and generates image and replies with tempfile in jpg."""
     if(os.getenv("GENERATE_IMAGE") == "OPENAI"):
         return openai_image(prompt)
     return imagen(prompt)
@@ -127,7 +142,7 @@ Prompt to rewrite
 '{PROMPT}'
 Don't generate images, just reply with the prompt.
 """
-  return text2text(expanded_prompt.replace("{PROMPT}", prompt))
+  return gemini(expanded_prompt.replace("{PROMPT}", prompt))
 
 
 if __name__ == "__main__":
