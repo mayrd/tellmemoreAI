@@ -22,27 +22,52 @@ def convert(input_file: str, output_file: str) -> None:
     except subprocess.CalledProcessError as e:
         print(f"An error occurred: {e}")
 
-def image_add_text(image_file:str, text: str, font_file: str, pos_x: int, pos_y: int, font_size: int) -> bool:
+def image_add_text(
+    image_file:str, text: str,
+    font_file: str, font_size: int,
+    pos_x: int, pos_y: int,
+    text_color = (255, 255, 255),
+    border_color = (0, 0, 0,), border_width: int = 0
+    ) -> bool:
     img = Image.open(image_file)
     d = ImageDraw.Draw(img)
     font = ImageFont.truetype(font_file, font_size)
-    text_color = (255, 255, 255)
-    text_position = (pos_x, pos_y)
-    d.text(text_position, text, fill=text_color, font=font)
+
+    for offset_border_x in range(-border_width, border_width + 1):
+        for offset_border_y in range(-border_width, border_width + 1):
+            if offset_border_x == 0 and offset_border_y == 0:
+                continue
+            d.text((pos_x + offset_border_x, pos_y + offset_border_y), text, font=font, fill=border_color)
+
+    d.text((pos_x, pos_y), text, fill=text_color, font=font)
     img.save(image_file)
     return True
 
-def image_add_text_centered(image_file:str, text: str, font_file: str, font_size: int, offset_x: int = 0, offset_y: int = 0) -> bool:
+def image_add_text_centered(
+    image_file: str, text:str,
+    font_file: str, font_size: int,
+    text_color = (255, 255, 255),
+    border_color = (0, 0, 0,), border_width: int = 0,
+    offset_x: int = 0, offset_y: int = 0
+    ) -> bool:
     img = Image.open(image_file)
-    d = ImageDraw.Draw(img)
+    draw = ImageDraw.Draw(img)
     font = ImageFont.truetype(font_file, font_size)
-    text_color = (255, 255, 255)
-    bbox = d.textbbox((0, 0), text, font=font)
+
+    # Calculate total text size for centering
+    bbox = draw.textbbox((0, 0), text, font=font)
     text_width = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
     x = (img.width - text_width) / 2
     y = (img.height - text_height) / 2
-    d.text((x + offset_x, y + offset_y), text, fill=text_color, font=font)
+
+    for offset_border_x in range(-border_width, border_width + 1):
+        for offset_border_y in range(-border_width, border_width + 1):
+            if offset_border_x == 0 and offset_border_y == 0:
+                continue
+            draw.text((x + offset_border_x + offset_x, y + offset_border_y + offset_y), text, font=font, fill=border_color)
+
+    draw.text((x + offset_x, y + offset_y), text, font=font, fill=text_color)
     img.save(image_file)
     return True
 
