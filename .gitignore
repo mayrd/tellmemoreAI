@@ -9,6 +9,7 @@ podcasts/
 fonts/
 ytplaylists.json
 .vscode/
+livestream.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
