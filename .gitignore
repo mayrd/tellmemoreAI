@@ -1,5 +1,4 @@
 # own rules
-list.txt
 chromedriver.exe
 client_secrets.json
 google_service_account.json
@@ -9,7 +8,7 @@ podcasts/
 fonts/
 ytplaylists.json
 .vscode/
-livestream.txt
+experimental
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
