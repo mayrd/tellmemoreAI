@@ -27,7 +27,7 @@ def gen_yt_title(wiki_article: str) -> str:
 
 def gen_short_title(wiki_article: str) -> str:
         return genai.genai_text(
-        f"We need a short title in 1-3 words and only reply with the short title for: {wiki_article}"
+        f"We need a short title in 1-3 words. If it is about a person, reply with the name of the person. Reply only with the short title for: {wiki_article}"
     ).replace("\"", "").strip()
 
 def gen_yt_description(wiki_article: str) -> str:
