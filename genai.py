@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import media
+import shutil
 import utils
 import dotenv
 import vertexai
@@ -79,15 +80,19 @@ def _get_google_credentials():
 
 
 def imagen3(prompt: str) -> str:
-    vertexai.init(credentials=_get_google_credentials())
+    vertexai.init(
+        project=os.getenv("GOOGLE_CLOUD_PROJECT_ID"), location=os.getenv("GOOGLE_CLOUD_LOCATION"),
+        credentials=_get_google_credentials(),
+    )
     generation_model = ImageGenerationModel.from_pretrained(os.getenv("IMAGEN_MODEL"))
 
     images = generation_model.generate_images(
         prompt=prompt,
         number_of_images=1,
         aspect_ratio="16:9",
-        safety_filter_level="block_only_high",
-        person_generation="allow_adult",
+        safety_filter_level="block_some",
+        #safety_filter_level="block_only_high",
+        #person_generation="allow_adult", # not GA
     )
 
     # store as tmp file as jpg and return
@@ -108,7 +113,7 @@ def genai_image(prompt: str) -> str:
     """takes takes text and generates image and replies with tempfile in jpg."""
     if(os.getenv("GENERATE_IMAGE") == "OPENAI"):
         return openai_image(prompt)
-    return imagen(prompt)
+    return imagen3(prompt)
 
 def genai_image_expanded(prompt: str) -> str:
     return genai_image(expand_image_prompt(prompt))
@@ -123,7 +128,7 @@ def genai_summarize(text: str) -> str:
 def expand_image_prompt(prompt: str) -> str:
   expanded_prompt = """
 Write a prompt for a text-to-image model following the style of the examples of prompts, and then I will give you a prompt that I want you to rewrite.
-Examples of prompts
+Examples of prompts:
 A close-up of a sleek Siamese cat perched regally, in front of a deep purple background, in a high-resolution photograph with fine details and color grading.
 Flat vector illustration of "Breathe deep" hand-lettering with floral and leaf decorations. Bright colors, simple lines, and a cute, minimalist design on a white background.
 Long exposure photograph of rocks and sea, long shot of cloudy skies, golden hour at the rocky shore with reflections in the water. High resolution.
@@ -136,7 +141,7 @@ A closeup of a pair of worn hands, wrinkled and weathered, gently cupping a fres
 A Dalmatian dog in front of a pink background in a full body dynamic pose shot with high resolution photography and fine details isolated on a plain stock photo with color grading in the style of a hyper realistic style
 A massive spaceship floating above an industrial city, with the lights of thousands of buildings glowing in the dusk. The atmosphere is dark and mysterious, in the cyberpunk style, and cinematic
 An architectural photograph of an interior space made from interwoven, organic forms and structures inspired in the style of coral reefs and patterned textures. The scene is bathed in the warm glow of natural light, creating intricate shadows that accentuate the fluidity and harmony between the different elements within the design
-Prompt to rewrite
+Prompt to rewrite:
 '{PROMPT}'
 Don't generate images, just reply with the prompt.
 """
@@ -145,6 +150,7 @@ Don't generate images, just reply with the prompt.
 
 if __name__ == "__main__":
     PROMPT=(
-        "A girl in a red dress."
+        expand_image_prompt("dog in a red dress.")
     )
-    print(genai_image(PROMPT))
+    file = imagen3(PROMPT)
+    shutil.move(file, "generated.jpg")
