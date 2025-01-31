@@ -78,8 +78,8 @@ def gen_thumbnail(yt_description: str, short_title: str, category: str, filename
 
     if category == "True Crime":
         category = "True Crime & Desasters"
-    media.image_add_text(image, category, os.path.join("fonts", playlist['font_file']), playlist['font_size_title'], 10, 0, border_width=2)
-    media.image_add_text_centered(image, short_title, os.path.join("fonts", playlist['font_file']), playlist['font_size_episode'], offset_y=playlist['font_size_episode_offset_y'], border_width=2)
+    media.image_add_text(image, category, os.path.join("fonts", playlist['font_file']), playlist['font_size_title'], 10, 0, border_width=5)
+    media.image_add_text_centered(image, short_title, os.path.join("fonts", playlist['font_file']), playlist['font_size_episode'], offset_y=playlist['font_size_episode_offset_y'], border_width=5)
     shutil.move(image, filename)
 
 
