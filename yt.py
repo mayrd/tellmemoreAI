@@ -201,6 +201,38 @@ def add_video_to_playlist(playlist_id, video_id) -> bool:
     return True
 
 
+def get_videos_from_playlist(playlist_id):
+  youtube = get_authenticated_service()
+  request = youtube.playlistItems().list(
+      part="snippet",
+      playlistId=playlist_id,
+      maxResults=50
+  )
+
+  video_ids = []
+  next_page_token = None
+
+  while True:
+    if next_page_token:
+      request = youtube.playlistItems().list(
+          part="snippet",
+          playlistId=playlist_id,
+          maxResults=50,
+          pageToken=next_page_token
+      )
+
+    response = request.execute()
+
+    for item in response['items']:
+      video_ids.append(item['snippet']['resourceId']['videoId'])
+
+    next_page_token = response.get('nextPageToken')
+
+    if not next_page_token:
+      break
+  return video_ids
+
+
 def get_latest_scheduled_publish_time(playlist_id: str) -> datetime.datetime:
   """Retrieves the latest scheduled publish time for videos in a YouTube playlist (handles pagination)."""
   try:
