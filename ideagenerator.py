@@ -69,7 +69,7 @@ def gen_next_video_url(category: str, description: str, used_urls: list) -> str:
 
 if __name__ == "__main__":
     playlists = utils.get_ytplaylists()
-    for playlist in playlists["list"]:
+    for playlist in playlists:
         if playlist["active"] is not True:
             continue
 

@@ -58,11 +58,11 @@ def get_ytplaylists():
     print("no ytplaylists.json")
     return None
 
-  return fromFile("ytplaylists.json")  
+  return fromFile("ytplaylists.json")["list"]
 
 def get_ytplaylist(category: str):
   playlists = get_ytplaylists()
-  for item in playlists["list"]:
+  for item in playlists:
     if item["title"] == category:
       return item
   return None

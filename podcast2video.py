@@ -147,7 +147,7 @@ def schedule(video_id: str, category: str) -> datetime.datetime:
 def print_last_pubs():
     print("\nSchedules:")
     playlists = utils.get_ytplaylists()
-    for item in playlists["list"]:
+    for item in playlists:
         latest_pub = yt.get_latest_scheduled_publish_time(item["playlistId"])
         if latest_pub is None:
             print(item["title"] + ": nothing scheduled")
