@@ -76,7 +76,11 @@ def gen_thumbnail(yt_description: str, short_title: str, category: str, filename
         f"here is the description: {yt_description}"
     )
     expanded_prompt = genai.expand_image_prompt(prompt)
-    image = genai.genai_image(expanded_prompt)
+    if "GENERATE_IMAGE_SYSTEM_OVERWRITE" in playlist:
+        print("GENERATE_IMAGE_SYSTEM_OVERWRITE to openai")
+        image = genai.openai_image(expanded_prompt)
+    else:
+        image = genai.genai_image(expanded_prompt)
 
     if category == "True Crime":
         category = "True Crime & Desasters"
