@@ -90,8 +90,8 @@ def imagen3(prompt: str) -> str:
         prompt=prompt,
         number_of_images=1,
         aspect_ratio="16:9",
-        safety_filter_level="block_some",
-        #safety_filter_level="block_only_high",
+        #safety_filter_level="block_some",
+        safety_filter_level="block_only_high",
         #person_generation="allow_adult", # not GA
     )
 
@@ -143,7 +143,7 @@ A massive spaceship floating above an industrial city, with the lights of thousa
 An architectural photograph of an interior space made from interwoven, organic forms and structures inspired in the style of coral reefs and patterned textures. The scene is bathed in the warm glow of natural light, creating intricate shadows that accentuate the fluidity and harmony between the different elements within the design
 Prompt to rewrite:
 '{PROMPT}'
-Don't generate images, just reply with the prompt.
+Don't generate images and only reply with the prompt.
 """
   return genai_text(expanded_prompt.replace("{PROMPT}", prompt))
 
