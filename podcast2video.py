@@ -29,6 +29,8 @@ def gen_short_title(wiki_article: str) -> str:
         return genai.genai_text(
             f"We need a short title in 1-3 words. Keep as short as possible. "
             f"If it is about a person, reply only with the name of the person. "
+            f"If it is about an object, reply only with the name for the object. "
+            f"Do not add History, Journey, Evolution, Podcast, Story or similar in the title. "
             f"Reply only with the short title for: {wiki_article}"
     ).replace("\"", "").strip()
 
@@ -55,17 +57,8 @@ def gen_yt_tags(wiki_article: str) -> list[str]:
     if len(arr) > 20:
         arr = arr[:20]
     return arr
-    
-def gen_thumbnail(yt_description: str, short_title: str, category: str, filename: str) -> None:
-    prompt_old = (
-        f"We created a podcast about the happenings and this is the description. "
-        f"Can you generate a thumbnail supporting the podcast? "
-        f"Add \"{short_title}\" as big text on the thumbnail and also add \"{category}\" as text on the thumbnail. "
-        f"This is the description what the podcast is about: {yt_description}"
-    )
-    playlist = utils.get_ytplaylist(category)
-    podcast_color = playlist['color']
-    style = playlist['style']
+
+def gen_thumbnail_prompt(short_title: str, yt_description: str, style: str, podcast_color: str) -> str:
     prompt = (
         f"Create an image for a podcast episode in {style} style. "
         f"Use the color {podcast_color}, but you can still use other colors to emphasize objects. "
@@ -75,17 +68,44 @@ def gen_thumbnail(yt_description: str, short_title: str, category: str, filename
         f"The episode has the title \"{short_title}\". "
         f"here is the description: {yt_description}"
     )
-    expanded_prompt = genai.expand_image_prompt(prompt)
-    if "GENERATE_IMAGE_SYSTEM_OVERWRITE" in playlist:
-        print("GENERATE_IMAGE_SYSTEM_OVERWRITE to openai")
-        image = genai.openai_image(expanded_prompt)
-    else:
-        image = genai.genai_image(expanded_prompt)
+    expanded_thumbnail_prompt = genai.expand_image_prompt(prompt)
+    return expanded_thumbnail_prompt
 
+def add_text_to_thumbnail(image_file: str, short_title: str, category: str) -> None:
+    playlist = utils.get_ytplaylist(category)
     if category == "True Crime":
         category = "True Crime & Desasters"
-    media.image_add_text(image, category, os.path.join("fonts", playlist['font_file']), playlist['font_size_title'], 10, 0, border_width=5)
-    media.image_add_text_centered(image, short_title, os.path.join("fonts", playlist['font_file']), playlist['font_size_episode'], offset_y=playlist['font_size_episode_offset_y'], border_width=5)
+
+    if len(short_title)>=19:
+        last_a_index = short_title.rfind(" ")
+        if last_a_index != -1:
+            short_title = short_title[:last_a_index] + "\n" + short_title[last_a_index + 1:]
+
+    media.image_add_text(
+        image_file, category,
+        os.path.join("fonts", playlist['font_file']), playlist['font_size_title'],
+        10, 0,
+        border_width=5
+    )
+    media.image_add_text_centered(
+        image_file, short_title,
+        os.path.join("fonts", playlist['font_file']), playlist['font_size_episode'],
+        offset_y=playlist['font_size_episode_offset_y'],
+        border_width=5
+    )
+    
+def gen_thumbnail(yt_description: str, short_title: str, category: str, filename: str, add_text: bool = True) -> None:
+    playlist = utils.get_ytplaylist(category)
+    prompt = gen_thumbnail_prompt(short_title, yt_description, playlist["style"], playlist["color"])
+    if "GENERATE_IMAGE_SYSTEM_OVERWRITE" in playlist:
+        print("GENERATE_IMAGE_SYSTEM_OVERWRITE to openai")
+        image = genai.openai_image(prompt)
+    else:
+        image = genai.genai_image(prompt)
+
+    if add_text is True:
+        add_text_to_thumbnail(image, short_title, category)
+
     shutil.move(image, filename)
 
 
