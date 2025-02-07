@@ -109,7 +109,9 @@ def step2_new_notebook(driver):
 
 
 def step3_add_website(driver, URL):
-    driver.find_element(By.ID, "mat-mdc-chip-2").click()
+    driver.find_element(By.CLASS_NAME, "add-source-button").click()
+    time.sleep(2)
+    driver.find_element(By.XPATH, "//span[text()='Website']").click()
     time.sleep(2)
     elem_url = driver.find_element(By.ID, "mat-input-0")
     elem_url.click()
