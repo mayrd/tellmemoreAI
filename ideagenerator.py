@@ -75,8 +75,21 @@ if __name__ == "__main__":
 
         urls_used = gather_wiki_urls(playlist["title"])
         print(playlist["title"])
-        for i in range(3):
-            next_url = gen_next_video_url(playlist["title"], playlist["short_description"], urls_used)
-            print(next_url)
-            append_to_database_json(playlist["title"], next_url.replace("https://en.wikipedia.org/wiki/",""), next_url)
-            urls_used.append(next_url)
+        for i in range(1):
+            try:
+                next_url = gen_next_video_url(playlist["title"], playlist["short_description"], urls_used)
+                print(next_url)
+                
+                if next_url in urls_used:
+                    print("\talready listed.")
+                    continue
+
+                page_id = wiki.get_page_id(next_url)
+                if page_id is None:
+                    print("\twiki page not found.")
+                    continue
+
+                append_to_database_json(playlist["title"], next_url.replace("https://en.wikipedia.org/wiki/",""), next_url)
+                urls_used.append(next_url)
+            except Exception as ex:
+                print(f"ERROR: {ex}")
