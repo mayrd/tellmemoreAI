@@ -216,6 +216,7 @@ def podcast2video(folder_name: str, pause_for_review: bool = False) -> bool:
     md["yt_video_id"] = yt.upload_video(video_file, md["yt_title"], md["yt_description"], md["yt_tags"])
     if md["yt_video_id"]:
         print(f"  uploaded to YT as " + md["yt_video_id"])
+        yt.set_thumbnail(md["yt_video_id"], os.path.join(folder_name, "img1.jpg"))
         add_to_playlist(md["yt_video_id"], md["category"])
         pub_time = schedule(md["yt_video_id"], md["category"])
         if pub_time is not None:
