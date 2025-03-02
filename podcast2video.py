@@ -74,7 +74,7 @@ def gen_thumbnail_prompt(short_title: str, yt_description: str, style: str, podc
 def add_text_to_thumbnail(image_file: str, short_title: str, category: str) -> None:
     playlist = utils.get_ytplaylist(category)
     if category == "True Crime":
-        category = "True Crime & Desasters"
+        category = "True Crime & Disasters"
 
     if len(short_title)>=19:
         last_a_index = short_title.rfind(" ")
