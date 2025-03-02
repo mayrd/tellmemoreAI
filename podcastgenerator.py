@@ -6,6 +6,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+import sys
 import time
 import os
 import shutil
@@ -205,6 +206,12 @@ def process():
     return
 
 if __name__ == "__main__":
-    while True:
+    LOOP = False
+    if len(sys.argv)>1 and sys.argv[1] == "loop":
+        LOOP = True
+
+    while LOOP:
         process()
         time.sleep(21600)
+        
+    process()
