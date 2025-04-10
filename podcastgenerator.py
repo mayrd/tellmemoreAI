@@ -84,8 +84,9 @@ def gen_podcast(URL:str) ->str:
                     return file
 
         print("Time over, but file not found!")
-    except:
-        print("Error")
+    except Exception as ex:
+        print("Error:")
+        print(ex)
     finally:
         print("(X) Teardown")
         time.sleep(2)
@@ -110,8 +111,6 @@ def step2_new_notebook(driver):
 
 
 def step3_add_website(driver, URL):
-    driver.find_element(By.CLASS_NAME, "add-source-button").click()
-    time.sleep(2)
     driver.find_element(By.XPATH, "//span[text()='Website']").click()
     time.sleep(2)
     elem_url = driver.find_element(By.ID, "mat-input-0")
@@ -125,7 +124,7 @@ def step3_add_website(driver, URL):
 def step4_wait_source_processing(driver):
     wait = WebDriverWait(driver, 360)
     wait.until(EC.visibility_of_element_located((By.CLASS_NAME, 'customize-button')))
-    time.sleep(25)
+    time.sleep(10)
 
 
 def step5_customize_podcast(driver):
@@ -212,6 +211,6 @@ if __name__ == "__main__":
 
     while LOOP:
         process()
-        time.sleep(21600)
+        time.sleep(6*60*60)
         
     process()
