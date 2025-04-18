@@ -24,6 +24,7 @@ PROMPT_PODCAST = (
     "Make the podcast 30 minutes long."
 )
 LOCAL_DOWNLOAD = os.getenv("LOCAL_DOWNLOAD_FOLDER")
+NOTEBOOKLM_URL = os.getenv("NOTEBOOKLM_URL", default= "https://notebooklm.google.com")
 
 
 def get_chrome_driver():
@@ -100,7 +101,7 @@ def gen_podcast(URL:str) ->str:
 
 def step1_open_notebooklm(driver):
     driver.switch_to.new_window()
-    driver.get("https://notebooklm.google.com")
+    driver.get(NOTEBOOKLM_URL)
     time.sleep(2)
     assert "NotebookLM" in driver.title
 
