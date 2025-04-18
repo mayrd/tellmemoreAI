@@ -121,6 +121,8 @@ def genai_text(prompt: str) -> str:
     """takes text prompt and replies with text. """
     if(os.getenv("GENERATE_TEXT") == "OPENAI"):
         return openai(prompt).strip()
+    if(os.getenv("GENERATE_TEXT") == "DEEPSEEK"):
+        return deepseek(prompt).strip()
     return gemini(prompt).strip()
 
 def genai_image(prompt: str) -> str:
