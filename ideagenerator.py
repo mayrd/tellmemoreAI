@@ -33,7 +33,7 @@ def _gather_wiki_urls_from_md_json(category: str) -> list:
                 else:
                     page = wiki.get_page_by_title(md['wiki_title'])
                 
-                urls.append(page.url)
+                urls.append(page.url.strip())
         except Exception as e:
             print(e)
     return urls
@@ -45,7 +45,7 @@ def _gather_wiki_urls_from_database_json(category: str):
     for item in db["list"]:
         if item['category'] != category:
             continue
-        urls.append(item['url'])
+        urls.append(item['url'].strip())
     return urls
 
 def append_to_database_json(category: str, title: str, url: str):
@@ -75,7 +75,7 @@ def gen_for_playlist(playlist_title: str, qty: int = 1) -> bool:
             next_url = gen_next_video_url(playlist_title, playlist["short_description"], urls_used)
             print(next_url)
 
-            if next_url in urls_used:
+            if next_url.lower().strip() in map(str.lower, urls_used):
                 print("\talready listed.")
                 continue
 
