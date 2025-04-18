@@ -102,6 +102,7 @@ def imagen3(prompt: str) -> str:
 
 
 ## deepseek methods
+
 def deepseek(prompt: str) -> str:
     try:
         client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")
