@@ -27,7 +27,7 @@ def openai(prompt: str) -> str:
             messages=[{"role": "user", "content": prompt}]
         )
         return response.choices[0].message.content
-    except Exception as e:
+    except Exception as ex:
         print(f"Error openai({prompt}): {ex}")
         return None
 
@@ -101,6 +101,20 @@ def imagen3(prompt: str) -> str:
     return temp_jpg.name
 
 
+## deepseek methods
+def deepseek(prompt: str) -> str:
+    try:
+        client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")
+        response = client.chat.completions.create(
+            model=os.getenv("DEEPSEEK_TEXT_MODEL"),
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content
+    except Exception as ex:
+        print(f"Error deepseek({prompt}): {ex}")
+        return None
+
+
 ### generic methods
 
 def genai_text(prompt: str) -> str:
@@ -149,8 +163,4 @@ Don't generate images and only reply with the prompt.
 
 
 if __name__ == "__main__":
-    PROMPT=(
-        expand_image_prompt("dog in a red dress.")
-    )
-    file = imagen3(PROMPT)
-    shutil.move(file, "generated.jpg")
+    print(deepseek("How does water taste?"))
