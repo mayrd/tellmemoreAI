@@ -21,7 +21,7 @@ PROMPT_PODCAST = (
     "Make the podcast like story-telling: adventurous and catchy. "
     "Try to identify one unique situation or a fun fact about the topic and add it to the podcast. "
     "In the middle of the podcast, tell people to hit the subscribe button, to not miss any another podcasts on \"Tell me More\". "
-    "Make the podcast 30 minutes long."
+    "Make the podcast 30 minutes long and in english language."
 )
 LOCAL_DOWNLOAD = os.getenv("LOCAL_DOWNLOAD_FOLDER")
 NOTEBOOKLM_URL = os.getenv("NOTEBOOKLM_URL", default= "https://notebooklm.google.com")
@@ -85,6 +85,8 @@ def gen_podcast(URL:str) ->str:
                     return file
 
         print("Time over, but file not found!")
+    except StopIteration as si:
+        raise si
     except Exception as ex:
         print("Error:")
         print(ex)
@@ -147,8 +149,12 @@ def step5_customize_podcast(driver):
 
 
 def step6_wait_podcast(driver):
+    elems_selector = 'button.playback-control-button, div.upsell-message'
+
     wait = WebDriverWait(driver, 360)
-    wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'button.playback-control-button')))
+    elem_found = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, elems_selector)))
+    if 'upsell-message' in elem_found.get_attribute('class'):
+        raise StopIteration('out of daily notebooklm quota')
 
 
 def step7_download_podcast(driver):
@@ -211,7 +217,11 @@ if __name__ == "__main__":
         LOOP = True
 
     while LOOP:
-        process()
-        time.sleep(6*60*60)
+        try:
+            process()
+        except StopIteration as si:
+            print("hit quota limit, waiting for 4h")
+
+        time.sleep(4*60*60)
         
     process()
