@@ -1,0 +1,17 @@
+# YouTube Shorts production pipeline
+# Install: pip install -r requirements.txt
+
+Pillow>=10.0.0
+python-dotenv>=1.0.0
+httpx>=0.27.0
+
+# YouTube Data API v3 + OAuth
+google-api-python-client>=2.100.0
+google-auth-oauthlib>=1.1.0
+
+# Analytics (optional, for youtube_analytics.py)
+google-analytics-data>=0.18.0
+
+# Note: edge-tts and ffmpeg required externally:
+#   pip install edge-tts
+#   apt install ffmpeg

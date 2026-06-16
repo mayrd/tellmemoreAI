@@ -1,55 +1,49 @@
-# tellmemore
-An AI-automated YouTube channel pipeline
+# Tell Me More AI!
 
-## Setup
+> An AI-automated YouTube channel — now agentic.
 
-Install python dependencies
-```
-pip install -r requirements.txt
-```
-Alternatively, use virtualenv (recommended).
+This is the production pipeline for [Tell Me More AI!](https://youtube.com/@tellmemoreai) —
+a YouTube channel powered by [Hermes Agent](https://hermes-agent.nousresearch.com).
 
-Copy `.env.example` to `.env` and configure your setup.
+## The Evolution: From Script to Agent
 
-Install additional Software
-```
-apt install ffmpeg imagemagick firefox
-```
+> **Note:** The original hard-coded Python pipeline has been moved to [`legacy/`](legacy/).
+> The channel is now fully agentic.
 
-## Howto
+### Then (legacy/)
 
-### (1) Generate Next Episode Ideas for your podcast
+| Script | What it did |
+|--------|-------------|
+| `ideagenerator.py` | Searched Wikipedia for podcast topics |
+| `podcastgenerator.py` | Used Selenium to generate NotebookLM podcasts |
+| `podcast2video.py` | Generated slide-show videos + thumbnails |
+| `genai.py` / `wiki.py` / `media.py` | AI helpers, Wikipedia scraping, media utils |
+| `yt.py` / `custom_thumbnail.py` | YouTube upload, custom thumbnails |
 
-`python ideagenerator.py` can be used to search for the potential next episode for your podcast.
-It will traverse `ytplaylists.json` and scan `database.json` and each `metadata.json` in your OUTPUT_FOLDER
-for the used wikipedia article. It will use the list of URLs and the short_description in your `ytplaylist.json`
-to ask for the next episode and return the wiki URL as podcast source. This URL will be automatically added to
-the list in `database.json`, so you can simply run step (2).
+### Now ([`hermes-agentic/`](hermes-agentic/))
 
-### (2) Generate Podcast sound file from Wikipedia Article
+A self-improving AI agent produces **3 Shorts/day**:
 
-`python podcastgenerator.py` reads the `database.json` file as pipeline.
-All items are tranversed and if the item does not have a `folder` defined, the script tries to create the podcast.
-For that, a chrome session is spun up with selenium webdriver, and creates a new notebook in notebookLM,
-adds the wikipedia article as source and provides podcast prompt until it eventually generates a podcast.
-This podcast is then downloaded and scanning the DOWNLOADS_FOLDER - when done it creates a subfolder in OUTPUT_FOLDER
-and moves the podcast.wav and adds the metadata.json
+1. **Research** → AI picks trending topics, checks dedup
+2. **Script** → Curiosity-gap format (hook / build-up / reveal)
+3. **Visuals** → Pexels videos + images with Ken Burns + crossfade
+4. **Captions** → TikTok-style animated word highlighting
+5. **TTS** → edge-tts narration
+6. **Upload** → Scheduled YouTube Shorts with AI content flags
+7. **Improve** → Weekly analytics feed back into the style guide
 
-database.json
-```
-{ "list":[
-    {
-        "category": "The Life Of",
-        "title": "Taylor Swift"
-    }
-]}
-```
+No human involved — the agent self-improves every week.
 
-### (3) Create and publish YouTube Video from audio file
+## Quick Start
 
-`python podcast2video.py` scans for subfolders in your `OUTPUT_FOLDER`.
-In your subfolder, there is usually a `metadata.json` file.
-This contains at least `category` and `wiki_title` (can be generated when `podcastgenerator.py` creates the podcast sound file).
-When traversing the different subfolders, it fills yt metadata with Gen AI and generates thumbnails in JPG format.
-After all is generated, it uses ffmpeg to sitch the audio together with the thumbnails as slide show, creating a video.mp4.
-This video.mp4 is then uploaded to YouTube and scheduled/configured how it is configured in `ytplaylists.json`.
+See [`hermes-agentic/`](hermes-agentic/) for the Shorts pipeline scripts.
+
+These scripts are designed to be called by Hermes Agent, but can also
+be run standalone for testing and debugging.
+
+## Legacy Code
+
+The original pipeline that used NotebookLM for podcast generation,
+Selenium browser automation, and slide-show video creation lives in
+[`legacy/`](legacy/). It is preserved for reference but no longer
+active in production.

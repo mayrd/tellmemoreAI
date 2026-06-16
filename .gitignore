@@ -9,6 +9,11 @@ fonts/
 ytplaylists.json
 .vscode/
 experimental
+youtube_token.json
+youtube_shorts_topics.json
+output/
+analytics_reports/
+.DS_Store
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
