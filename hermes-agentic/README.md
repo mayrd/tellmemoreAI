@@ -78,3 +78,12 @@ The agentic approach replaces fixed scripts with:
 - Pexels API key (free tier)
 - YouTube Data API v3 with OAuth
 - Pillow, httpx, python-dotenv
+
+## True Crime Builder
+
+See [`true-crime-builder/`](true-crime-builder/) for the 10-15 minute true crime documentary pipeline:
+- `scripts/build_tc_video.py` — Full pipeline with Ken Burns, cascaded xfade, captions, thumbnails
+- `scripts/upload_true_crime.py` — Upload with custom description, tags, and playlist integration
+- `SKILL.md` — Complete Hermes Agent skill documentation
+
+**v1.1 (July 2026):** Fixed final compose timeout (300→900s), added V4L2 hardware encoder auto-detection, `ultrafast` preset for RPi.

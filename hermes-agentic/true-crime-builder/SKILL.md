@@ -1,7 +1,7 @@
 ---
 name: true-crime-builder
 description: "End-to-end true crime documentary builder — scriptwriting, TTS narration, Pexels imagery, Ken Burns animations, subtitle captions, thumbnail generation, YouTube upload. 10-15 minute landscape videos."
-version: 1.0.0
+version: 1.1.0
 author: Hermes Agent
 license: MIT
 platforms: [linux]
@@ -134,8 +134,10 @@ Diversify queries for visual variety (18 queries × 7 images = ~126 for 10-min v
 | Ken Burns (120 segments × 6s) | ~12 min |
 | Cascaded xfade (12 batches) | ~5 min |
 | Caption rendering (PIL + qtrle) | ~3 min |
-| Final compose | ~2 min |
-| **Total** | **~27 min** |
+| Final compose (libx264 ultrafast or hw V4L2) | ~8–12 min |
+| **Total** | **~33–37 min** |
+
+**Important:** Final compose uses `ultrafast` preset on RPi (no GPU). Timeout is 900s (15 min). Hardware V4L2 encoder auto-detected if available.
 
 ## Output
 
@@ -169,3 +171,5 @@ Use for YouTube SEO:
 4. **Emoji in title:** Security scanner blocks emoji. Use plain ASCII titles.
 5. **qtrle encoding:** Use `qtrle -pix_fmt argb`, NOT `prores_ks` (timeout on RPi).
 6. **Caption rendering performance:** 12fps captions for 10-min video ≈ 7,200 PNG frames. Allow 3 min.
+7. **Final compose timeout:** libx264 `preset fast` with 10+ min video times out at 300s. Now uses `ultrafast` with 900s timeout. Auto-detects `h264_v4l2m2m` hardware encoder if available (Docker needs `/dev/video*` passthrough).
+8. **PIL import:** System Python (`/usr/bin/python3`) has Pillow, venvs may not. Use `/usr/bin/python3` for thumbnail generation.

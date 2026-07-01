@@ -47,12 +47,12 @@ be run standalone for testing and debugging.
 The agent also produces **true crime documentary videos** (10-15 minute landscape format)
 using the same Ken Burns, Pexels, and TTS infrastructure as the Shorts pipeline.
 
-See [](hermes-agentic/true-crime-builder/) for:
+See [`hermes-agentic/true-crime-builder/`](hermes-agentic/true-crime-builder/) for the full skill documentation.
 
 | Script | Purpose |
 |--------|---------|
-|  | Full pipeline: TTS → Pexels → Ken Burns → Captions → Thumbnail |
-|  | Upload with custom description, tags, thumbnail, playlist |
+| `scripts/build_tc_video.py` | Full pipeline: TTS → Pexels → Ken Burns → Captions → Thumbnail |
+| `scripts/upload_true_crime.py` | Upload with custom description, tags, thumbnail, playlist |
 
 Produces 1920×1080 landscape videos with:
 - Ken Burns animated imagery from Pexels (100+ landscape photos)

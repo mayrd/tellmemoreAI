@@ -324,12 +324,22 @@ caps = render_captions(script, audio_dur)
 tmp_muxed = os.path.join(tmp_dir, 'muxed.mp4')
 run(['ffmpeg', '-y', '-i', video, '-i', AUDIO, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k',
      '-shortest', tmp_muxed], timeout=120, label='mux audio')
+
+# Detect best encoder: hw V4L2 or software fallback
+has_hw = subprocess.run(['ffmpeg', '-hide_banner', '-encoders'], capture_output=True, text=True)
+hw_enc = 'h264_v4l2m2m' if 'h264_v4l2m2m' in has_hw.stdout else None
+# Use ultrafast for speed on RPi; HW encoder uses -b:v, SW uses -crf
+if hw_enc:
+    vcodec_opts = ['-c:v', hw_enc, '-b:v', '4M', '-pix_fmt', 'yuv420p']
+else:
+    vcodec_opts = ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p']
+
+compose_timeout = 900  # 15 min for long videos
 run(['ffmpeg', '-y', '-i', tmp_muxed, '-i', caps,
      '-filter_complex', '[0:v][1:v]overlay=0:0:format=auto[outv]',
-     '-map', '[outv]', '-map', '0:a',
-     '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p',
-     '-c:a', 'aac', '-b:a', '128k', '-shortest', '-movflags', '+faststart',
-     '-r', str(FPS), OUTPUT], timeout=300, label='final compose')
+     '-map', '[outv]', '-map', '0:a'] + vcodec_opts +
+     ['-c:a', 'copy', '-shortest', '-movflags', '+faststart',
+      '-r', str(FPS), OUTPUT], timeout=compose_timeout, label='final compose')
 
 # 8. Thumbnail
 make_thumbnail(TITLE, THUMB)
