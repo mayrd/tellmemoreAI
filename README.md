@@ -41,6 +41,26 @@ See [`hermes-agentic/`](hermes-agentic/) for the Shorts pipeline scripts.
 These scripts are designed to be called by Hermes Agent, but can also
 be run standalone for testing and debugging.
 
+
+## True Crime Documentaries
+
+The agent also produces **true crime documentary videos** (10-15 minute landscape format)
+using the same Ken Burns, Pexels, and TTS infrastructure as the Shorts pipeline.
+
+See [](hermes-agentic/true-crime-builder/) for:
+
+| Script | Purpose |
+|--------|---------|
+|  | Full pipeline: TTS → Pexels → Ken Burns → Captions → Thumbnail |
+|  | Upload with custom description, tags, thumbnail, playlist |
+
+Produces 1920×1080 landscape videos with:
+- Ken Burns animated imagery from Pexels (100+ landscape photos)
+- Cascaded crossfade transitions (disk-buffered, no OOM)
+- Subtitle-bar captions with word-level timing
+- Auto-generated thumbnails with title + TRUE CRIME badge
+- YouTube playlist integration
+
 ## Legacy Code
 
 The original pipeline that used NotebookLM for podcast generation,
