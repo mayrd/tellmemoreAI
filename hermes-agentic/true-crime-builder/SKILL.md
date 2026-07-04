@@ -1,7 +1,7 @@
 ---
 name: true-crime-builder
 description: "End-to-end true crime documentary builder — scriptwriting, TTS narration, Pexels imagery, Ken Burns animations, subtitle captions, thumbnail generation, YouTube upload. 10-15 minute landscape videos."
-version: 1.1.0
+version: 1.2.0
 author: Hermes Agent
 license: MIT
 platforms: [linux]
@@ -12,7 +12,7 @@ metadata:
     related_skills: [youtube-shorts-builder]
 ---
 
-# true-crime-builder v1.0
+# true-crime-builder v1.2
 
 End-to-end pipeline for producing 10–15 minute true crime documentary videos in landscape 16:9 format for YouTube.
 
@@ -21,7 +21,7 @@ End-to-end pipeline for producing 10–15 minute true crime documentary videos i
 ```
 Research → Script (LLM or manual) → TTS (edge-tts) → Pexels Images (100+ landscape)
     → Ken Burns (zoompan) → Cascaded Xfade (batches of 10) → Subtitle Captions
-    → Thumbnail (PIL overlay) → YouTube Upload (custom description + tags) → Playlist
+    → Thumbnail (crime scene bg + police tape badge) → YouTube Upload (resumable, chunked) → Playlist
 ```
 
 ## When to Use
@@ -36,7 +36,8 @@ Research → Script (LLM or manual) → TTS (edge-tts) → Pexels Images (100+ l
 | Script | Purpose |
 |--------|---------|
 | `/opt/data/build_tc_video.py` | Full pipeline: TTS → Pexels → Ken Burns → Captions → Thumbnail |
-| `/opt/data/upload_true_crime.py` | Upload with custom description, tags, thumbnail, playlist |
+| `/opt/data/upload_true_crime.py` | Lightweight upload (<400 MB) with custom description, tags, thumbnail, playlist |
+| `/opt/data/upload_resumable.py` | **Resumable chunked upload** for 800+ MB videos — use this for full 10-15 min productions |
 | `/opt/data/true_crime_script.txt` | Script text (input) |
 | `/opt/data/true_crime_description.txt` | YouTube description with hashtags |
 
@@ -64,20 +65,30 @@ python3 /opt/data/build_tc_video.py \
 
 The script handles:
 - Pexels image search + download (100+ landscape images from 18 diverse queries)
-- Ken Burns zoompan (1.0→1.08×, Hermite easing, 30fps internal)
+- Ken Burns zoompan (1.0→1.04×, Hermite easing, 24fps — gentle for big screen; pre-normalizes all images to 16:9 with scale+crop to prevent distortion)
 - Cascaded xfade crossfades (batches of 10 to avoid OOM)
 - Subtitle-bar captions (semi-transparent black bar, white text, 32px)
-- Thumbnail generation (dark background + title + TRUE CRIME badge)
+- Thumbnail generation (crime scene photo background + dark overlay + large title + police-tape TRUE CRIME badge)
 
 ### Step 4: Upload
+
+**For 10-15 min videos (800+ MB):** Use resumable chunked upload — the single-request upload times out at 120s.
+```bash
+/opt/hermes/.venv/bin/python3 /opt/data/upload_resumable.py \
+  /tmp/true_crime_final.mp4 \
+  "Video Title Here" \
+  /tmp/true_crime_thumb.jpg
 ```
+
+**For shorter test videos (<400 MB):** The lightweight uploader works fine.
+```bash
 /opt/hermes/.venv/bin/python3 /opt/data/upload_true_crime.py \
   /tmp/true_crime_final.mp4 \
   "Video Title Here" \
   /tmp/true_crime_thumb.jpg
 ```
 
-Uploads with:
+Both upload with:
 - Custom description (from `/opt/data/true_crime_description.txt`)
 - Proper hashtags: #TrueCrime #UnsolvedMystery #ColdCase etc.
 - Custom thumbnail
@@ -100,11 +111,15 @@ Unlike the TikTok pill captions used in Shorts, true crime documentaries use a *
 - Same word-level timing engine as Shorts pipeline
 
 ### Thumbnails
-Auto-generated with PIL:
-- Dark background (15, 15, 25)
-- Title in large white text, word-wrapped
-- Red "TRUE CRIME" badge below title
-- 1280×720 JPEG
+Auto-generated with PIL — **crime scene photo backdrop + bold overlay styling:**
+
+1. **Background:** Fresh crime scene photo downloaded from Pexels via `download_crime_scene_bg()` at pipeline start (searches "crime scene tape dark", landscape, selects top result). Falls back to solid dark (#0A0A14) if Pexels key missing or download fails.
+2. **Dark overlay:** RGBA gradient overlay (140–180 alpha) dims the photo so white text pops against any background.
+3. **Title:** 72pt DejaVu Sans Bold, white with multi-directional 4px black shadow. Auto-wraps at 1150px width. Shrinks to 56pt if >4 lines.
+4. **TRUE CRIME badge:** 80pt white text on blood-red (#820808) rectangle with dark shadow backdrop (#050202). Wrapped in a **yellow police-tape border** (#DCB414, 5px) with diagonal dark-red stripes (#960C0C, 3px) inside. Dual-layer text shadow (4px black + 2px dark red offset) for depth.
+5. Output: 1280×720 JPEG, quality 92.
+
+⚠️ The badge police-tape styling is rendered entirely in PIL (rectangles + diagonal lines) — no external assets needed.
 
 ### Memory Safety (Cascaded Xfade)
 ⚠️ **Critical:** Never xfade-concat more than 10 segments at once on RPi (8GB RAM).
@@ -145,7 +160,7 @@ Diversify queries for visual variety (18 queries × 7 images = ~126 for 10-min v
 - **FPS:** 24
 - **Codec:** H.264 (yuv420p) + AAC 128k
 - **Duration:** 10–15 minutes
-- **Size:** ~200–300 MB
+- **Size:** ~800 MB (ultrafast preset) — **requires resumable upload** (`upload_resumable.py`)
 
 ## Tags & Hashtags
 
@@ -173,3 +188,4 @@ Use for YouTube SEO:
 6. **Caption rendering performance:** 12fps captions for 10-min video ≈ 7,200 PNG frames. Allow 3 min.
 7. **Final compose timeout:** libx264 `preset fast` with 10+ min video times out at 300s. Now uses `ultrafast` with 900s timeout. Auto-detects `h264_v4l2m2m` hardware encoder if available (Docker needs `/dev/video*` passthrough).
 8. **PIL import:** System Python (`/usr/bin/python3`) has Pillow, venvs may not. Use `/usr/bin/python3` for thumbnail generation.
+9. **Upload timeout for large videos:** `upload_true_crime.py` uses single-request multipart upload with 120s timeout — fails with `TimeoutError` for 800+ MB videos. **Use `upload_resumable.py` instead** for full productions (10 MB chunks, YouTube resumable upload protocol, progress reporting). The resumable uploader also auto-sets the thumbnail and adds to the True Crime & Disasters playlist.
