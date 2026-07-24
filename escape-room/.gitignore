@@ -1,0 +1,8 @@
+# Generated files (regenerate with generate_escape_room.py)
+assets/audio/
+output/die_letzte_schicht.mp4
+*.wav
+
+# Keep the chapter data and description
+!output/youtube_description.txt
+!output/chapters.json
