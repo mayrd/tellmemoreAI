@@ -32,17 +32,15 @@ VOICE_ANTAGONIST = "de-DE-KillianNeural"    # Antagonist (male, deep)
 # ─────────────────────────────────────────────────────────────
 # Maps segment keys to voices based on content type
 
-def get_voice_for_segment(segment_key: str) -> str:
-    """Determine which voice to use for each segment."""
+def get_voice_for_segment(segment_key: str) -> tuple[str, str]:
+    """Determine (voice, rate) for each segment."""
     if segment_key.startswith("decision_"):
-        return VOICE_DECISION
+        return (VOICE_DECISION, "-15%")  # Slower for clarity
     if segment_key in ("ending_3", "ending_4"):
-        # Dark endings use antagonist voice
-        return VOICE_ANTAGONIST  
+        return (VOICE_ANTAGONIST, "+0%")
     if segment_key == "path_a2":
-        # Dr. Wagner's office scene
-        return VOICE_ANTAGONIST
-    return VOICE_NARRATOR
+        return (VOICE_ANTAGONIST, "+0%")
+    return (VOICE_NARRATOR, "+0%")
 
 # ─────────────────────────────────────────────────────────────
 # 2. CHUNK TEXT for TTS (handle long segments)
@@ -164,16 +162,16 @@ async def generate_all_audio():
             chunk_paths = []
             for i, chunk in enumerate(chunks):
                 path = str(AUDIO_DIR / f"{segment_key}_part{i:02d}.mp3")
-                voice = get_voice_for_segment(segment_key)
-                dur = await generate_tts(chunk, voice, path)
+                voice, rate = get_voice_for_segment(segment_key)
+                dur = await generate_tts(chunk, voice, path, rate=rate)
                 chunk_paths.append((path, dur))
                 print(f"  [{segment_key} part {i+1}/{len(chunks)}] {dur:.1f}s ({voice})")
             
             all_segments[segment_key] = chunk_paths
         else:
             path = str(AUDIO_DIR / f"{segment_key}.mp3")
-            voice = get_voice_for_segment(segment_key)
-            dur = await generate_tts(text, voice, path)
+            voice, rate = get_voice_for_segment(segment_key)
+            dur = await generate_tts(text, voice, path, rate=rate)
             all_segments[segment_key] = [(path, dur)]
             print(f"  [{segment_key}] {dur:.1f}s ({voice})")
         
@@ -191,71 +189,67 @@ async def generate_all_audio():
 
 def assemble_video(segments, chapter_data, segment_order):
     """Combine all audio into one video with chapter markers."""
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"\n🎬 Step 2: Assembling video...")
     
-    # Pre-generate any missing repeat audio
+    # Calculate exact timestamps from audio files
+    file_list = []
     for segment_key, _ in segment_order:
-        if segment_key.endswith("_repeat"):
+        if segment_key.endswith("_pause"):
+            pause_path = str(AUDIO_DIR / f"{segment_key}.wav")
+            if not os.path.exists(pause_path):
+                generate_silence(30.0, pause_path)
+            file_list.append(pause_path)
+        elif segment_key == "gap_2s":
+            gap_path = str(AUDIO_DIR / "gap_200ms.mp3")
+            file_list.extend([gap_path] * 10)
+        elif segment_key.endswith("_repeat") or segment_key.endswith("_options") or segment_key.endswith("_options_repeat") or segment_key.endswith("_question_repeat"):
             repeat_path = str(AUDIO_DIR / f"{segment_key}.mp3")
             if not os.path.exists(repeat_path):
                 text = chapter_data.get(segment_key, "")
                 if text:
-                    voice = get_voice_for_segment(segment_key)
-                    # Generate TTS synchronously
+                    voice, rate = get_voice_for_segment(segment_key)
                     subprocess.run([
                         "python3", "-m", "edge_tts",
-                        "--voice", voice,
-                        "--text", text,
-                        "--write-media", repeat_path,
+                        "--voice", voice, "--rate", rate,
+                        "--text", text, "--write-media", repeat_path,
                     ], check=True, capture_output=True, timeout=120)
-                    print(f"  Generated repeat: {segment_key}")
+            file_list.append(repeat_path)
+        elif segment_key in segments:
+            for chunk_path, _ in segments[segment_key]:
+                file_list.append(chunk_path)
     
-    # Create FFmpeg concat file
-    concat_lines = []
+    # Get exact durations of all files using ffprobe
+    exact_durations = []
+    for fp in file_list:
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_format", "-of", "json", fp],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            duration = float(json.loads(result.stdout)["format"]["duration"])
+        else:
+            duration = 0.0
+        exact_durations.append(duration)
+    
+    # Calculate chapter timestamps from exact durations
     chapter_markers = []
-    current_time = 0.0  # seconds
     chapter_index = 1
+    current_time = 0.0
+    file_idx = 0
     
-    # Temporary file list for concat
-    file_list_path = str(OUTPUT_DIR / "file_list.txt")
-    
-    with open(file_list_path, "w") as f:
-        for segment_key, _ in segment_order:
-            if segment_key.endswith("_pause"):
-                # Generate pause silence (30 seconds)
-                pause_path = str(AUDIO_DIR / f"{segment_key}.wav")
-                if not os.path.exists(pause_path):
-                    generate_silence(30.0, pause_path)
-                f.write(f"file '{pause_path}'\n")
-                current_time += 30.0
-                continue
-            
-            if segment_key.endswith("_repeat"):
-                # Generate repeat text TTS if not done
-                repeat_path = str(AUDIO_DIR / f"{segment_key}.mp3")
-                if not os.path.exists(repeat_path):
-                    # Use decision voice for repeats
-                    text = chapter_data.get(segment_key, "")
-                    if text:
-                        voice = get_voice_for_segment(segment_key)
-                        asyncio.run(generate_tts(text, voice, repeat_path))
-                
-                f.write(f"file '{repeat_path}'\n")
-                result = subprocess.run(
-                    ["ffprobe", "-v", "quiet", "-show_format", "-of", "json", repeat_path],
-                    capture_output=True, text=True,
-                )
-                if result.returncode == 0:
-                    dur = float(json.loads(result.stdout)["format"]["duration"])
-                    current_time += dur
-                continue
-            
-            if segment_key not in segments:
-                continue
-            
+    for segment_key, _ in segment_order:
+        if segment_key.endswith("_pause"):
+            current_time += exact_durations[file_idx] if file_idx < len(exact_durations) else 0
+            file_idx += 1
+        elif segment_key == "gap_2s":
+            for _ in range(10):
+                current_time += exact_durations[file_idx] if file_idx < len(exact_durations) else 0
+                file_idx += 1
+        elif segment_key.endswith("_repeat") or segment_key.endswith("_options") or segment_key.endswith("_options_repeat") or segment_key.endswith("_question_repeat"):
+            current_time += exact_durations[file_idx] if file_idx < len(exact_durations) else 0
+            file_idx += 1
+        elif segment_key in segments:
             file_label = chapter_data.get(f"{segment_key}_title", "")
-            
-            # Add chapter marker at start of this segment
             if file_label:
                 chapter_markers.append({
                     "index": chapter_index,
@@ -263,34 +257,11 @@ def assemble_video(segments, chapter_data, segment_order):
                     "label": file_label,
                 })
                 chapter_index += 1
-            
-            # Add all audio chunks for this segment
-            for chunk_path, chunk_dur in segments[segment_key]:
-                f.write(f"file '{chunk_path}'\n")
-                current_time += chunk_dur
+            for _ in segments[segment_key]:
+                current_time += exact_durations[file_idx] if file_idx < len(exact_durations) else 0
+                file_idx += 1
     
-    total_duration = current_time
-    
-    # Build FFmpeg command
-    output_video = str(OUTPUT_DIR / "die_letzte_schicht.mp4")
-    
-    # Create chapter metadata file for FFmpeg
-    metadata_path = str(OUTPUT_DIR / "chapter_meta.txt")
-    with open(metadata_path, "w") as f:
-        f.write(";FFMETADATA1\n")
-        for marker in chapter_markers:
-            start_ms = int(marker["start_sec"] * 1000)
-            # End time is the next chapter or total duration
-            next_start = total_duration * 1000
-            for m in chapter_markers:
-                m_start = int(m["start_sec"] * 1000)
-                if m_start > start_ms and m_start < next_start:
-                    next_start = m_start
-            f.write("[CHAPTER]\n")
-            f.write("TIMEBASE=1/1000\n")
-            f.write(f"START={start_ms}\n")
-            f.write(f"END={next_start}\n")
-            f.write(f"title={marker['label']}\n")
+    total_duration = sum(exact_durations)
     
     print(f"\nChapter markers: {len(chapter_markers)}")
     for m in chapter_markers:
@@ -300,62 +271,161 @@ def assemble_video(segments, chapter_data, segment_order):
     
     print(f"\nTotal duration: {int(total_duration//60)}:{int(total_duration%60):02d}")
     
-    # Generate video with static image + audio + chapters
-    thumbnail_path = str(ASSETS_DIR / "images" / "thumbnail.png")
+    # Write concat file for audio
+    file_list_path = str(OUTPUT_DIR / "file_list.txt")
+    with open(file_list_path, "w") as f:
+        for fp in file_list:
+            f.write(f"file '{fp}'\n")
     
-    # First create concat with ffmpeg
+    # Concatenate audio
     audio_concat = str(OUTPUT_DIR / "full_audio.mp3")
-    
     subprocess.run([
         "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-        "-i", file_list_path,
-        "-c", "copy", audio_concat,
-    ], check=True, capture_output=True)
+        "-i", file_list_path, "-c", "copy", audio_concat,
+    ], check=True, capture_output=True, timeout=120)
+    print(f"  Audio concat: OK ({os.path.getsize(audio_concat)/1e6:.1f} MB)")
     
-    # Then create video with the static image
+    # Build FFmpeg with image switching at exact timestamps
+    # Determine which image to use for each segment
+    thumbnail_path = str(ASSETS_DIR / "images" / "thumbnail.png")
+    segment_images = {}
+    for segment_key, _ in segment_order:
+        for prefix in ["decision_1", "decision_2a", "decision_3a1", "decision_3a2", 
+                       "decision_2b", "decision_3b1", "decision_3b2"]:
+            if segment_key.startswith(prefix):
+                overlay = str(ASSETS_DIR / "images" / f"{prefix}_overlay.jpg")
+                if os.path.exists(overlay):
+                    segment_images[segment_key] = overlay
+                    break
+    
+    # Build video segment list with images and durations, consolidating consecutive same-image segments
+    video_segments = []
+    exact_pos = 0
+    prev_img = None
+    current_dur = 0.0
+    
+    for i, (segment_key, _) in enumerate(segment_order):
+        dur = 0.0
+        if segment_key.endswith("_pause"):
+            dur = exact_durations[exact_pos] if exact_pos < len(exact_durations) else 0
+            exact_pos += 1
+        elif segment_key == "gap_2s":
+            for _ in range(10):
+                dur += exact_durations[exact_pos] if exact_pos < len(exact_durations) else 0
+                exact_pos += 1
+        elif segment_key.endswith("_repeat") or segment_key.endswith("_options") or segment_key.endswith("_options_repeat") or segment_key.endswith("_question_repeat"):
+            dur = exact_durations[exact_pos] if exact_pos < len(exact_durations) else 0
+            exact_pos += 1
+        elif segment_key in segments:
+            for _ in segments[segment_key]:
+                dur += exact_durations[exact_pos] if exact_pos < len(exact_durations) else 0
+                exact_pos += 1
+        
+        if dur <= 0:
+            continue
+        
+        img = segment_images.get(segment_key, str(thumbnail_path) if os.path.exists(thumbnail_path) else "color=c=black:s=1920x1080")
+        
+        # Consolidate consecutive same-image segments
+        if img == prev_img:
+            video_segments[-1] = (img, video_segments[-1][1] + dur)
+        else:
+            video_segments.append((img, dur))
+            prev_img = img
+    
+    # Get actual concat duration from output audio
+    audio_dur_result = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", audio_concat],
+        capture_output=True, text=True,
+    )
+    total_audio_dur = float(audio_dur_result.stdout.strip()) if audio_dur_result.returncode == 0 else sum(exact_durations)
+    print(f"  Total audio: {total_audio_dur:.0f}s = {total_audio_dur/60:.1f} min")
+    
+    # Recalculate chapter timestamps from actual concat duration
+    # Scale exact_durations proportionally to match actual concat duration
+    summed_durs = sum(exact_durations)
+    scale = total_audio_dur / summed_durs if summed_durs > 0 else 1.0
+    scaled_durations = [d * scale for d in exact_durations]
+    
+    chapter_markers = []
+    chapter_index = 1
+    current_time = 0.0
+    file_idx = 0
+    
+    for segment_key, _ in segment_order:
+        if segment_key.endswith("_pause"):
+            current_time += scaled_durations[file_idx] if file_idx < len(scaled_durations) else 0
+            file_idx += 1
+        elif segment_key == "gap_2s":
+            for _ in range(10):
+                current_time += scaled_durations[file_idx] if file_idx < len(scaled_durations) else 0
+                file_idx += 1
+        elif segment_key.endswith("_repeat") or segment_key.endswith("_options") or segment_key.endswith("_options_repeat") or segment_key.endswith("_question_repeat"):
+            current_time += scaled_durations[file_idx] if file_idx < len(scaled_durations) else 0
+            file_idx += 1
+        elif segment_key in segments:
+            file_label = chapter_data.get(f"{segment_key}_title", "")
+            if file_label:
+                chapter_markers.append({
+                    "index": chapter_index,
+                    "start_sec": current_time,
+                    "label": file_label,
+                })
+                chapter_index += 1
+            for _ in segments[segment_key]:
+                current_time += scaled_durations[file_idx] if file_idx < len(scaled_durations) else 0
+                file_idx += 1
+    
+    total_duration = total_audio_dur
+    
+    print(f"\nChapter markers: {len(chapter_markers)}")
+    for m in chapter_markers:
+        m_min = int(m["start_sec"] // 60)
+        m_sec = int(m["start_sec"] % 60)
+        print(f"  {m['index']:2d}. {m_min:02d}:{m_sec:02d} - {m['label']}")
+    
+    print(f"\nTotal duration: {int(total_duration//60)}:{int(total_duration%60):02d}")
+    
+    # Create video from static thumbnail + audio
+    output_video = str(OUTPUT_DIR / "die_letzte_schicht.mp4")
+    thumbnail_path = str(ASSETS_DIR / "images" / "thumbnail.png")
+    
     if os.path.exists(thumbnail_path):
         subprocess.run([
             "ffmpeg", "-y",
-            "-loop", "1",
-            "-i", thumbnail_path,
+            "-loop", "1", "-t", str(total_audio_dur), "-i", thumbnail_path,
             "-i", audio_concat,
-            "-c:v", "libx264",
-            "-tune", "stillimage",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-pix_fmt", "yuv420p",
-            "-shortest",
-            "-metadata", f"title=Die letzte Schicht - Interaktiver Audio Escape Room",
-            "-metadata", "artist=Tell Me More AI",
-            "-metadata", "genre=Crime, Thriller, Interactive",
-            output_video,
-        ], check=True, capture_output=True)
-    else:
-        # Generate a black placeholder
-        subprocess.run([
-            "ffmpeg", "-y",
-            "-f", "lavfi", "-i", "color=c=black:s=1920x1080:d=5",
-            "-i", audio_concat,
-            "-c:v", "libx264",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-shortest",
-            output_video,
-        ], check=True, capture_output=True)
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-preset", "ultrafast", "-tune", "stillimage",
+            "-c:a", "copy",
+            "-shortest", output_video,
+        ], check=True, capture_output=True, timeout=300)
+        print(f"  Video created: {os.path.getsize(output_video)/1e6:.1f} MB")
     
-    # Add chapters using ffmpeg metadata
-    chaptered_video = str(OUTPUT_DIR / "die_letzte_schicht_final.mp4")
+    # Create chapter metadata file
+    metadata_path = str(OUTPUT_DIR / "chapter_meta.txt")
+    with open(metadata_path, "w") as f:
+        f.write(";FFMETADATA1\n")
+        for i, marker in enumerate(chapter_markers):
+            start_ms = int(marker["start_sec"] * 1000)
+            end_ms = int(chapter_markers[i+1]["start_sec"] * 1000) if i+1 < len(chapter_markers) else int(total_duration * 1000)
+            f.write("[CHAPTER]\n")
+            f.write("TIMEBASE=1/1000\n")
+            f.write(f"START={start_ms}\n")
+            f.write(f"END={end_ms}\n")
+            f.write(f"title={marker['label']}\n")
+    
+    # Add chapters
+    chaptered = str(OUTPUT_DIR / "chapters_output.mp4")
     subprocess.run([
         "ffmpeg", "-y",
         "-i", output_video,
         "-i", metadata_path,
-        "-map_metadata", "1",
-        "-codec", "copy",
-        chaptered_video,
-    ], check=True, capture_output=True)
-    
-    # Replace with chaptered version
-    os.replace(chaptered_video, output_video)
+        "-map", "0", "-map_metadata", "1",
+        "-c", "copy", chaptered,
+    ], check=True, capture_output=True, timeout=120)
+    os.replace(chaptered, output_video)
+    print(f"  Chapters added: OK")
     
     print(f"\n✅ Video saved: {output_video}")
     print(f"   File size: {os.path.getsize(output_video) / 1024 / 1024:.1f} MB")
