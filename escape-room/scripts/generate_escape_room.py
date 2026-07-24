@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Generate the interactive escape room video.
-Pipeline: TTS → silence → chapters → video → info cards.
+Pipeline: TTS -> silence -> chapters -> video -> info cards.
+Supports multiple languages via --language flag.
 """
 
 import asyncio
@@ -11,36 +12,72 @@ import sys
 import subprocess
 import tempfile
 import shutil
+import argparse
 from pathlib import Path
 
 # Edge TTS
 import edge_tts
 
+# Parse arguments
+parser = argparse.ArgumentParser(description="Generate Audio Escape Room Video")
+parser.add_argument("--language", "-l", default="de", choices=["de"],
+                    help="Language code (default: de)")
+args = parser.parse_args()
+LANGUAGE = args.language
+
 PROJECT_DIR = Path(__file__).parent.parent  # escape-room root
 ASSETS_DIR = PROJECT_DIR / "assets"
-AUDIO_DIR = ASSETS_DIR / "audio"
+AUDIO_DIR = ASSETS_DIR / "audio" / LANGUAGE
 OUTPUT_DIR = PROJECT_DIR / "output"
 SCRIPTS_DIR = PROJECT_DIR / "scripts"
 
-# Voices
-VOICE_NARRATOR = "de-DE-KatjaNeural"       # Lena Voss (female, warm)
-VOICE_DECISION = "de-DE-ConradNeural"       # Question voice (male, authoritative)
-VOICE_ANTAGONIST = "de-DE-KillianNeural"    # Antagonist (male, deep)
+# ─────────────────────────────────────────────────────────────
+# LANGUAGE CONFIGURATION
+# ─────────────────────────────────────────────────────────────
+# Add new languages here. Voices must exist in edge-tts.
+# List all voices: python3 -m edge_tts --list-voices | grep <lang>
 
-# ─────────────────────────────────────────────────────────────
-# 1. VOICE MAPPING per Segment
-# ─────────────────────────────────────────────────────────────
-# Maps segment keys to voices based on content type
+LANGUAGE_CONFIG = {
+    "de": {
+        "narrator": "de-DE-KatjaNeural",       # Female, warm – narrator
+        "decision": "de-DE-ConradNeural",       # Male, authoritative – questions
+        "antagonist": "de-DE-KillianNeural",    # Male, deep – antagonist scenes
+        "decision_rate": "-15%",                # Slower for clarity
+    },
+    # Future languages — uncomment and add voice names when ready:
+    # "en": {
+    #     "narrator": "en-US-JennyNeural",
+    #     "decision": "en-US-GuyNeural",
+    #     "antagonist": "en-US-DavisNeural",
+    #     "decision_rate": "-15%",
+    # },
+    # "fr": {
+    #     "narrator": "fr-FR-DeniseNeural",
+    #     "decision": "fr-FR-HenriNeural",
+    #     "antagonist": "fr-FR-ClaudeNeural",
+    #     "decision_rate": "-15%",
+    # },
+    # "es": {
+    #     "narrator": "es-ES-ElviraNeural",
+    #     "decision": "es-ES-AlvaroNeural",
+    #     "antagonist": "es-ES-TeoNeural",
+    #     "decision_rate": "-15%",
+    # },
+}
 
 def get_voice_for_segment(segment_key: str) -> tuple[str, str]:
-    """Determine (voice, rate) for each segment."""
+    """Determine (voice, rate) for each segment based on language config."""
+    cfg = LANGUAGE_CONFIG.get(LANGUAGE, LANGUAGE_CONFIG["de"])
+    narrator, decision, antagonist = cfg["narrator"], cfg["decision"], cfg["antagonist"]
+    rate = cfg["decision_rate"]
+    
     if segment_key.startswith("decision_"):
-        return (VOICE_DECISION, "-15%")  # Slower for clarity
+        return (decision, rate)
     if segment_key in ("ending_3", "ending_4"):
-        return (VOICE_ANTAGONIST, "+0%")
-    if segment_key == "path_a2":
-        return (VOICE_ANTAGONIST, "+0%")
-    return (VOICE_NARRATOR, "+0%")
+        return (antagonist, "+0%")
+    if segment_key == "chapter_a2":
+        return (antagonist, "+0%")
+    return (narrator, "+0%")
 
 # ─────────────────────────────────────────────────────────────
 # 2. CHUNK TEXT for TTS (handle long segments)
