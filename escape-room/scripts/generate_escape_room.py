@@ -1,382 +1,354 @@
 #!/usr/bin/env python3
 """
-Generate interactive escape room video with multi-repeat decisions, SRT subtitles,
-spoil-free chapters, and configurable voice speed.
+Generic Audio Escape Room Video Generator
+=========================================
+Generates an interactive audio escape room YouTube video from story data.
+
+Usage:
+  python3 scripts/generate_escape_room.py --story de/letzte-schicht
+
+The story file (e.g. stories/de/letzte-schicht.py) must define:
+  STORY, VOICES, CHAPTERS, DECISIONS, SEGMENTS
 """
 
-import asyncio, json, os, sys, subprocess, argparse, re
+import asyncio, json, os, sys, subprocess, time, argparse, importlib.util
 from pathlib import Path
 import edge_tts
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--language", "-l", default="de", choices=["de"])
+# ── Args ────────────────────────────────────────────────────
+parser = argparse.ArgumentParser(description="Generate Audio Escape Room Video")
+parser.add_argument("--story", "-s", default="de/letzte-schicht",
+                    help="Story path relative to stories/ dir (e.g. 'de/letzte-schicht')")
+parser.add_argument("--skip-tts", action="store_true",
+                    help="Skip TTS generation (use existing audio)")
+parser.add_argument("--preset", default="ultrafast",
+                    help="FFmpeg preset (default: ultrafast, good for RPi)")
 args = parser.parse_args()
-LANG = args.language
 
-PROJECT = Path(__file__).parent.parent
-AUDIO_DIR = PROJECT / "assets" / "audio" / LANG
-OUTPUT = PROJECT / "output"
-IMAGES = PROJECT / "assets" / "images"
+# ── Paths ────────────────────────────────────────────────────
+PROJECT_DIR = Path(__file__).parent.parent
+SCRIPTS_DIR = PROJECT_DIR / "scripts"
+ASSETS_DIR = PROJECT_DIR / "assets"
 
-# Voice config
-VOICES = {
-    "de": {"narrator": "de-DE-KatjaNeural", "decision": "de-DE-ConradNeural",
-           "antagonist": "de-DE-KillianNeural", "decision_rate": "-30%"},
-}
+# Load story
+STORY_PATH = Path(args.story)
+if not STORY_PATH.suffix:
+    STORY_PATH = STORY_PATH.with_suffix(".py")
+story_file = PROJECT_DIR / "stories" / STORY_PATH
+if not story_file.exists():
+    print(f"ERROR: Story file not found: {story_file}")
+    print(f"Available stories:")
+    for f in sorted((PROJECT_DIR / "stories").rglob("*.py")):
+        rel = f.relative_to(PROJECT_DIR / "stories")
+        print(f"  {rel}")
+    sys.exit(1)
 
-def get_voice(key):
-    cfg = VOICES[LANG]
-    if key.startswith("decision") or key.startswith("repeat"):
-        return cfg["decision"], cfg["decision_rate"]
-    if key in ("ending_3", "ending_4", "chapter_a2"):
-        return cfg["antagonist"], "+0%"
-    return cfg["narrator"], "+0%"
+spec = importlib.util.spec_from_file_location("story_data", story_file)
+story_mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(story_mod)
 
-# ── HELPERS ──
+STORY_META = story_mod.STORY
+VOICES = story_mod.VOICES
+CHAPTERS = story_mod.CHAPTERS
+DECISIONS = story_mod.DECISIONS
+SEGMENTS = story_mod.SEGMENTS
 
-async def tts(text, voice, rate, path):
-    communicate = edge_tts.Communicate(text, voice, rate=rate)
-    await communicate.save(path)
-    r = subprocess.run(["ffprobe","-v","quiet","-show_entries","format=duration","-of","csv=p=0",path],
-                       capture_output=True, text=True)
-    return float(r.stdout.strip())
+LANG = STORY_META["language"]
+STORY_ID = STORY_META["id"]
+STORY_TITLE = STORY_META["title"]
 
-def silence(dur, path):
+AUDIO_DIR = ASSETS_DIR / "audio" / LANG
+OUTPUT_DIR = PROJECT_DIR / "output"
+
+print(f"Story: {STORY_ID} ({LANG})")
+print(f"Title: {STORY_TITLE}")
+print(f"Target play: ~{STORY_META.get('target_play_minutes', '?')} min")
+
+# ── Voice Resolution ────────────────────────────────────────
+def resolve_voice(voice_key: str) -> tuple[str, str]:
+    """Return (voice_name, rate) for a voice role key."""
+    cfg = VOICES.get(voice_key, VOICES["narrator"])
+    return cfg["voice"], cfg.get("rate", "+0%")
+
+# ── TTS Generation ───────────────────────────────────────────
+def chunk_text(text: str, max_chars: int = 3000) -> list[str]:
+    if len(text) <= max_chars:
+        return [text]
+    chunks, sentences = [], text.replace("! ", "!\n").replace("? ", "?\n").replace(". ", ".\n").split("\n")
+    current = ""
+    for sentence in sentences:
+        s = sentence.strip()
+        if not s: continue
+        if len(current) + len(s) + 1 > max_chars and current:
+            chunks.append(current.strip())
+            current = s + " "
+        else:
+            current += s + " "
+    if current.strip(): chunks.append(current.strip())
+    return chunks
+
+async def generate_tts(text: str, voice: str, output_path: str, rate: str = "+0%", pitch: str = "+0Hz") -> float:
+    if not text: return 0.0
+    communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
+    await communicate.save(output_path)
+    result = subprocess.run(["ffprobe", "-v", "quiet", "-show_format", "-of", "json", output_path],
+                            capture_output=True, text=True)
+    return float(json.loads(result.stdout)["format"]["duration"]) if result.returncode == 0 else 0.0
+
+def generate_silence(duration_sec: float, output_path: str, sample_rate: int = 44100):
     import struct, wave
-    with wave.open(path, 'w') as f:
-        f.setnchannels(1); f.setsampwidth(2); f.setframerate(44100)
-        f.writeframes(struct.pack(f'<{int(44100*dur)}h', *[0]*int(44100*dur)))
+    num_samples = int(sample_rate * duration_sec)
+    with wave.open(output_path, 'w') as wf:
+        wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(sample_rate)
+        wf.writeframes(struct.pack(f'<{num_samples}h', *[0] * num_samples))
 
-def ffprobe_dur(path):
-    r = subprocess.run(["ffprobe","-v","quiet","-show_entries","format=duration","-of","csv=p=0",str(path)],
-                       capture_output=True, text=True)
-    return float(r.stdout.strip()) if r.returncode == 0 else 0.0
-
-# ── BUILD SEGMENT LIST ──
-# Segments are built programmatically: narrative + decision blocks + endings + outro
-
-def build_full_segments():
-    import importlib.util
-    sys.path.insert(0, str(PROJECT))
-    spec = importlib.util.spec_from_file_location("story_data", str(PROJECT / "story_data.py"))
-    sd = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(sd)
-    STORY = sd.STORY
-    DECISIONS = sd.DECISIONS
-    CHAPTER_TITLES = sd.CHAPTER_TITLES
-    
-    segs = []  # (segment_key, chapter_label, text_or_special)
-    all_texts = {}
-    
-    # Intro
-    segs.append(("intro", CHAPTER_TITLES.get("intro",""), STORY["intro"]))
-    
-    # Build decision blocks + narrative chapters + endings dynamically
-    # Structure:
-    #   NARRATIVE → gap_5s → DECISION BLOCK (3 repeats) → gap_5s → NARRATIVE → ...
-    
-    decision_flow = [
-        ("decision_1", "chapter_a", "chapter_b"),
-        ("decision_2a", "chapter_a1", "chapter_a2"),
-        ("decision_3a1", None, None),  # no more narrative after this, just endings
-        ("decision_3a2", None, None),
-        ("decision_2b", "chapter_b1", "chapter_b2"),
-        ("decision_3b1", None, None),
-        ("decision_3b2", None, None),
-    ]
-    
-    endings = ["ending_1", "ending_2", "ending_3", "ending_4"]
-    
-    for dec_key, path_a, path_b in decision_flow:
-        # Gap before decision
-        segs.append(("gap_5s", None, ""))
-        
-        # Decision block with 3 repetitions
-        d = DECISIONS.get(dec_key)
-        if d:
-            segs.append((f"{dec_key}_intro", None, "Jetzt musst du entscheiden wie es weitergeht."))
-            segs.append((f"{dec_key}_q", None, d["question"]))
-            for letter, option_text in d["options"]:
-                segs.append((f"{dec_key}_opt_{letter}", None, f"{letter}: {option_text}"))
-            
-            # Pause 1: 10 seconds
-            segs.append((f"{dec_key}_pause1", None, None))  # silence
-            
-            # Repeat 1
-            segs.append((f"{dec_key}_r1_intro", None, "Jetzt musst du entscheiden wie es weitergeht."))
-            segs.append((f"{dec_key}_r1_q", None, d["question"]))
-            for letter, option_text in d["options"]:
-                segs.append((f"{dec_key}_r1_opt_{letter}", None, f"{letter}: {option_text}"))
-            
-            # Pause 2: 30 seconds
-            segs.append((f"{dec_key}_pause2", None, None))
-            
-            # Repeat 2
-            segs.append((f"{dec_key}_r2_intro", None, "Jetzt musst du entscheiden wie es weitergeht."))
-            segs.append((f"{dec_key}_r2_q", None, d["question"]))
-            for letter, option_text in d["options"]:
-                segs.append((f"{dec_key}_r2_opt_{letter}", None, f"{letter}: {option_text}"))
-            
-            # Pause 3: 15 seconds
-            segs.append((f"{dec_key}_pause3", None, None))
-        
-        # Gap after decision
-        segs.append(("gap_5s", None, ""))
-        
-        # Narrative chapters
-        if path_a and path_a in STORY:
-            segs.append((path_a, CHAPTER_TITLES.get(path_a, path_a), STORY[path_a]))
-        if path_b and path_b in STORY:
-            segs.append((path_b, CHAPTER_TITLES.get(path_b, path_b), STORY[path_b]))
-    
-    # Endings
-    for ek in endings:
-        if ek in STORY:
-            segs.append((ek, CHAPTER_TITLES.get(ek, ek), STORY[ek]))
-    
-    # Outro
-    segs.append(("outro", CHAPTER_TITLES.get("outro","Abspann"), STORY.get("outro","")))
-    
-    return segs, DECISIONS
-
-# ── GENERATE ALL AUDIO ──
-
-async def gen_all():
-    segs, decisions = build_full_segments()
-    assert segs, "No segments!"
-    
-    # Collect unique texts to generate
-    text_segments = {}
-    for key, label, text in segs:
-        if text is not None and text:
-            text_segments[key] = text
-    
-    generated = {}
-    total_chars = 0
-    for key, text in text_segments.items():
-        path = AUDIO_DIR / f"{key}.mp3"
-        voice, rate = get_voice(key)
-        dur = await tts(text, voice, rate, str(path))
-        generated[key] = [(str(path), dur)]
-        total_chars += len(text)
-        print(f"  [{key}] {dur:.1f}s ({voice}, {rate})")
-    
-    print(f"\n  Total chars: {total_chars}")
-    return generated, segs, decisions
-
-# ── BUILD SRT SUBTITLES ──
-
-def build_subtitles(segs, decisions, audio_durations, file_list):
-    """Create .srt entries for decision blocks showing question + options."""
-    srt_entries = []
-    idx = 1
-    current_time = 0.0
-    dur_pos = 0
-    
-    for key, label, text in segs:
-        dur = audio_durations[dur_pos] if dur_pos < len(audio_durations) else 0
-        dur_pos += 1
-        
-        # Check if this segment belongs to a decision block
-        dec_key = None
-        for dk in decisions:
-            if key.startswith(dk):
-                dec_key = dk
-                break
-        
-        if dec_key and ("_q" in key or "_pause" in key or "_opt_" in key):
-            d = decisions[dec_key]
-            lines = []
-            
-            if "_q" in key:
-                lines.append(f"❓ {d['question']}")
-                for letter, opt_text in d["options"]:
-                    lines.append(f"   {letter}: {opt_text}")
-            elif "_opt_" in key:
-                for letter, opt_text in d["options"]:
-                    lines.append(f"{letter}: {opt_text}")
-            elif "_pause" in key:
-                lines.append(f"❓ {d['question']}")
-                for letter, opt_text in d["options"]:
-                    lines.append(f"   {letter}: {opt_text}")
-            
-            if lines:
-                start = current_time
-                end = current_time + dur
-                srt_entries.append((start, end, "\n".join(lines), idx))
-                idx += 1
-        
-        current_time += dur
-    
-    # Write SRT
-    srt_path = OUTPUT / "subtitles.srt"
-    with open(srt_path, "w", encoding="utf-8") as f:
-        for start, end, text, idx in srt_entries:
-            f.write(f"{idx}\n")
-            f.write(f"{fmt_srt(start)} --> {fmt_srt(end)}\n")
-            f.write(f"{text}\n\n")
-    
-    print(f"  SRT: {len(srt_entries)} subtitle entries")
-    return str(srt_path)
-
-def fmt_srt(sec):
-    h = int(sec // 3600)
-    m = int((sec % 3600) // 60)
-    s = int(sec % 60)
-    ms = int((sec - int(sec)) * 1000)
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
-
-# ── ASSEMBLE VIDEO ──
-
-async def main():
-    print("=" * 60)
-    print("  Die letzte Schicht - Escape Room Generator v3")
-    print("=" * 60)
-    
+async def generate_all_audio():
+    """Generate TTS for all CHAPTERS and DECISIONS."""
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-    OUTPUT.mkdir(parents=True, exist_ok=True)
+    segments = {}
+    total_chars = 0
     
-    print("\n Generating audio...")
-    generated, segs, decisions = await gen_all()
+    # Chapters
+    for key, ch in CHAPTERS.items():
+        text = ch.get("text", "")
+        if not text: continue
+        total_chars += len(text)
+        voice_name, rate = resolve_voice(ch.get("voice", "narrator"))
+        chunks_list = chunk_text(text)
+        
+        chunk_paths = []
+        for i, chunk in enumerate(chunks_list):
+            path = str(AUDIO_DIR / f"{key}_part{i:02d}.mp3")
+            dur = await generate_tts(chunk, voice_name, path, rate=rate)
+            chunk_paths.append((path, dur))
+        segments[key] = chunk_paths
+        print(f"  [{key}] {sum(d for _, d in chunk_paths):.1f}s ({voice_name})")
     
-    print("\n Building file list...")
+    # Decision sub-segments
+    for dk, dc in DECISIONS.items():
+        for part in ["question", "options", "question_repeat", "options_repeat"]:
+            text = dc.get(part, "")
+            if not text: continue
+            total_chars += len(text)
+            voice_name, rate = resolve_voice("decision")
+            path = str(AUDIO_DIR / f"{dk}_{part}.mp3")
+            dur = await generate_tts(text, voice_name, path, rate=rate)
+            segments[f"{dk}_{part}"] = [(path, dur)]
+            print(f"  [{dk}_{part}] {dur:.1f}s ({voice_name})")
+    
+    print(f"\nTotal text: {total_chars} chars")
+    return segments
+
+# ── Video Assembly ───────────────────────────────────────────
+def assemble_video(segments):
+    """Build the final video with audio concat, chapters, and thumbnail."""
+    thumbnail_path = str(ASSETS_DIR / "images" / "thumbnail.png")
     
     # Build file list and get exact durations
     file_list = []
-    for key, label, text in segs:
-        if key.startswith("gap_5s"):
-            gap = AUDIO_DIR / "gap_5s.wav"
-            if not gap.exists():
-                silence(5.0, str(gap))
-            file_list.append(str(gap))
-        elif key.endswith("_pause1"):
-            p = AUDIO_DIR / f"{key}.wav"
-            if not Path(p).exists():
-                silence(10.0, p)
-            file_list.append(p)
-        elif key.endswith("_pause2"):
-            p = AUDIO_DIR / f"{key}.wav"
-            if not Path(p).exists():
-                silence(30.0, p)
-            file_list.append(p)
-        elif key.endswith("_pause3"):
-            p = AUDIO_DIR / f"{key}.wav"
-            if not Path(p).exists():
-                silence(15.0, p)
-            file_list.append(p)
-        elif key in generated:
-            for path, _ in generated[key]:
-                file_list.append(path)
-        elif text is not None and text:
-            # Generate TTS for any missing segments
-            path = str(AUDIO_DIR / f"{key}.mp3")
-            voice, rate = get_voice(key)
-            dur = await tts(text, voice, rate, path)
-            generated[key] = [(path, dur)]
-            file_list.append(path)
+    gap_path = str(AUDIO_DIR.parent.parent / "audio" / "gap_200ms.mp3")
+    
+    for item in SEGMENTS:
+        if isinstance(item, str):
+            # Chapter or ending
+            if item in segments:
+                for chunk_path, _ in segments[item]:
+                    file_list.append(chunk_path)
+        elif isinstance(item, tuple):
+            key, sub = item
+            if sub == "gap":
+                if os.path.exists(gap_path):
+                    file_list.extend([gap_path] * 10)  # 2s gap
+            if key in DECISIONS:
+                for part in ["question", "options", "pause", "question_repeat", "options_repeat"]:
+                    seg_key = f"{key}_{part}"
+                    if part == "pause":
+                        pause_path = str(AUDIO_DIR / f"{key}_pause.wav")
+                        if not os.path.exists(pause_path):
+                            generate_silence(DECISIONS[key].get("pause_s", 30), pause_path)
+                        file_list.append(pause_path)
+                    elif seg_key in segments:
+                        fpath = segments[seg_key][0][0]
+                        file_list.append(fpath)
     
     # Get exact durations
-    exact_durs = [ffprobe_dur(f) for f in file_list]
-    total_dur = sum(exact_durs)
-    print(f"  Total: {total_dur:.0f}s = {total_dur/60:.1f} min")
+    exact_durations = []
+    for fp in file_list:
+        r = subprocess.run(["ffprobe", "-v", "quiet", "-show_format", "-of", "json", fp],
+                           capture_output=True, text=True)
+        dur = float(json.loads(r.stdout)["format"]["duration"]) if r.returncode == 0 else 0.0
+        exact_durations.append(dur)
     
     # Calculate chapter timestamps
-    chapters = []
+    chapters_out = []
     current_time = 0.0
-    for i, (key, label, text) in enumerate(segs):
-        dur = exact_durs[i]
-        if label:
-            chapters.append((current_time, label))
-        current_time += dur
+    file_idx = 0
     
-    print(f"\n Chapters ({len(chapters)}):")
-    for ts, lb in chapters:
-        m, s = int(ts//60), int(ts%60)
-        print(f"  {m:02d}:{s:02d} - {lb}")
+    for item in SEGMENTS:
+        if isinstance(item, str):
+            dur_sum = 0.0
+            if item in segments:
+                for _ in segments[item]:
+                    dur_sum += exact_durations[file_idx] if file_idx < len(exact_durations) else 0
+                    file_idx += 1
+            
+            ch_info = CHAPTERS.get(item, {})
+            title = ch_info.get("title", "")
+            if title:
+                chapters_out.append({"start_sec": current_time, "label": title, "key": item})
+            current_time += dur_sum
+        
+        elif isinstance(item, tuple):
+            key, sub = item
+            if sub == "gap":
+                for _ in range(10):
+                    current_time += exact_durations[file_idx] if file_idx < len(exact_durations) else 0
+                    file_idx += 1
+            if key in DECISIONS:
+                total_dur = 0.0
+                for part in ["question", "options", "pause", "question_repeat", "options_repeat"]:
+                    seg_key = f"{key}_{part}"
+                    if part == "pause":
+                        total_dur += exact_durations[file_idx] if file_idx < len(exact_durations) else 0
+                        file_idx += 1
+                    elif seg_key in segments:
+                        total_dur += exact_durations[file_idx] if file_idx < len(exact_durations) else 0
+                        file_idx += 1
+                current_time += total_dur
     
-    # Write concat file
-    flist = OUTPUT / "file_list.txt"
-    with open(flist, "w") as f:
+    total_dur = sum(exact_durations)
+    
+    print(f"\nChapter markers: {len(chapters_out)}")
+    for i, ch in enumerate(chapters_out):
+        m, s = int(ch["start_sec"]//60), int(ch["start_sec"]%60)
+        print(f"  {i+1:2d}. {m:02d}:{s:02d} - {ch['label']}")
+    print(f"\nTotal duration: {int(total_dur//60)}:{int(total_dur%60):02d}")
+    
+    # Write concat list
+    file_list_path = str(OUTPUT_DIR / "file_list.txt")
+    with open(file_list_path, "w") as f:
         for fp in file_list:
             f.write(f"file '{fp}'\n")
     
     # Concat audio
-    audio_out = str(OUTPUT / "full_audio.mp3")
-    subprocess.run(["ffmpeg","-y","-f","concat","-safe","0","-i",str(flist),"-c","copy",audio_out],
+    audio_concat = str(OUTPUT_DIR / f"{STORY_ID}_audio.mp3")
+    subprocess.run(["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                    "-i", file_list_path, "-c", "copy", audio_concat],
                    check=True, capture_output=True, timeout=120)
-    print(f"\n Audio concat: {os.path.getsize(audio_out)/1e6:.1f} MB")
+    print(f"  Audio: {os.path.getsize(audio_concat)/1e6:.1f} MB")
     
-    # Build SRT subtitles for decision blocks
-    srt_path = build_subtitles(segs, decisions, exact_durs, file_list)
+    # Get actual audio duration
+    dur_r = subprocess.run(["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", audio_concat],
+                           capture_output=True, text=True)
+    actual_dur = float(dur_r.stdout.strip()) if dur_r.returncode == 0 else total_dur
     
-    # Create chapter metadata
-    meta = OUTPUT / "chapter_meta.txt"
-    with open(meta, "w") as f:
+    # Scale chapter timestamps to actual duration
+    scale = actual_dur / total_dur if total_dur > 0 else 1.0
+    for ch in chapters_out:
+        ch["start_sec"] *= scale
+    total_dur = actual_dur
+    
+    # Write chapter metadata
+    meta_path = str(OUTPUT_DIR / "chapter_meta.txt")
+    with open(meta_path, "w") as f:
         f.write(";FFMETADATA1\n")
-        for i, (ts, lb) in enumerate(chapters):
-            end = chapters[i+1][0] if i+1 < len(chapters) else total_dur
-            f.write(f"[CHAPTER]\nTIMEBASE=1/1000\nSTART={int(ts*1000)}\nEND={int(end*1000)}\ntitle={lb}\n")
+        for i, ch in enumerate(chapters_out):
+            start_ms = int(ch["start_sec"] * 1000)
+            end_ms = int(chapters_out[i+1]["start_sec"] * 1000) if i+1 < len(chapters_out) else int(total_dur * 1000)
+            f.write(f"[CHAPTER]\nTIMEBASE=1/1000\nSTART={start_ms}\nEND={end_ms}\ntitle={ch['label']}\n")
     
-    # Create video with static image + SRT subtitles
-    thumb = IMAGES / "thumbnail.png"
-    video = str(OUTPUT / "die_letzte_schicht.mp4")
-    
-    if thumb.exists():
-        subprocess.run([
-            "ffmpeg", "-y",
-            "-loop","1","-t",str(total_dur),"-i",str(thumb),
-            "-i", audio_out,
-            "-vf", f"subtitles={srt_path}:force_style='FontName=DejaVuSans-Bold,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=80'",
-            "-c:v","libx264","-pix_fmt","yuv420p","-preset","ultrafast","-tune","stillimage",
-            "-c:a","copy",
-            "-shortest", video,
-        ], check=True, capture_output=True, timeout=600)
-        print(f" Video: {os.path.getsize(video)/1e6:.1f} MB")
+    # Create video
+    output_video = str(OUTPUT_DIR / f"{STORY_ID}.mp4")
+    subprocess.run([
+        "ffmpeg", "-y", "-loop", "1", "-t", str(actual_dur),
+        "-i", thumbnail_path, "-i", audio_concat,
+        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-preset", args.preset, "-tune", "stillimage",
+        "-c:a", "copy", "-shortest", output_video,
+    ], check=True, capture_output=True, timeout=300)
+    print(f"  Video: {os.path.getsize(output_video)/1e6:.1f} MB")
     
     # Add chapters
-    ch = OUTPUT / "ch_ready.mp4"
-    subprocess.run(["ffmpeg","-y","-i",video,"-i",str(meta),"-map","0","-map_metadata","1","-c","copy",str(ch)],
+    chaptered = str(OUTPUT_DIR / f"{STORY_ID}_chapters.mp4")
+    subprocess.run(["ffmpeg", "-y", "-i", output_video, "-i", meta_path,
+                    "-map", "0", "-map_metadata", "1", "-c", "copy", chaptered],
                    check=True, capture_output=True, timeout=120)
-    ch.replace(video)
-    print(" Chapters added.")
+    os.replace(chaptered, output_video)
+    print(f"  Chapters added")
     
-    # Generate description
-    desc = f"""# Die letzte Schicht - Interaktiver Audio Escape Room
+    return output_video, chapters_out
 
-**Ein Krimi-Horspiel von Tell Me More AI**
-
-Du bist Kommissarin Lena Voss. Eine verlassene Psychiatrie in den Alpen. Ein verschwundener Direktor.
-
-## Kapitel (zum Springen klicken)
-
-"""
-    for ts, lb in chapters:
-        m, s = int(ts//60), int(ts%60)
-        desc += f"{m:02d}:{s:02d} - {lb}\n"
+# ── Description ──────────────────────────────────────────────
+def generate_description(chapters_out):
+    """Generate YouTube description with chapter timestamps."""
+    desc = f"# 🎧 {STORY_TITLE}\n\n"
+    desc += STORY_META.get("description_intro", "") + "\n\n"
+    desc += "Wähle deinen Weg. Jede Entscheidung zählt.\n\n---\n\n## 📖 Chapters\n\n"
     
-    desc += """
-
-## So funktioniert's
-1. Hore das Intro und die erste Entscheidung
-2. Wahle zwischen den Optionen
-3. Springe zum entsprechenden Kapitel
-4. Die Geschichte geht weiter
-
-## Die 4 Enden
-| Ende | Beschreibung |
-|------|-------------|
-| Ende 1 | Bittersuss |
-| Ende 2 | Das beste Ende |
-| Ende 3 | Schlecht |
-| Ende 4 | Schlecht |
-
-#Krimi #Horspiel #EscapeRoom #Interaktiv #TellMeMoreAI
-"""
-    (OUTPUT / "youtube_description.txt").write_text(desc, encoding="utf-8")
+    for i, ch in enumerate(chapters_out):
+        m, s = int(ch["start_sec"]//60), int(ch["start_sec"]%60)
+        desc += f"{m:02d}:{s:02d} – {ch['label']}\n"
     
-    print(f"\n Done! Video: {video}")
-    print(f" Chapters: {len(chapters)}")
-    print(f" Duration: {total_dur/60:.1f} min")
+    desc += "\n---\n\n## 🎮 How it works\n"
+    desc += "1️⃣ Listen to the intro and first decision\n"
+    desc += "2️⃣ Choose between option A or B\n"
+    desc += "3️⃣ Click the corresponding chapter link above\n"
+    desc += "4️⃣ The story continues to the next decision point\n\n"
+    desc += f"At each decision you have 30 seconds to make your choice.\n\n"
+    desc += "---\n\n**Production:** Tell Me More AI\n"
+    desc += f"**Voices:** Edge TTS\n"
+    desc += f"**Language:** {LANG}\n"
+    
+    tags = STORY_META.get("tags", [])
+    if tags:
+        desc += "\n" + " ".join(f"#{t}" for t in tags)
+    
+    desc_path = str(OUTPUT_DIR / f"{STORY_ID}_description.txt")
+    with open(desc_path, "w", encoding="utf-8") as f:
+        f.write(desc)
+    print(f"\nDescription: {desc_path}")
+
+# ── Main ─────────────────────────────────────────────────────
+async def main():
+    print("=" * 60)
+    print(f"🎧 Audio Escape Room Generator — {STORY_ID}")
+    print("=" * 60)
+    
+    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    
+    if not args.skip_tts:
+        print("\n📢 Generating TTS audio...")
+        segments = await generate_all_audio()
+    else:
+        print("\n📍 Skipping TTS (--skip-tts), loading existing audio...")
+        segments = {}
+        for key in CHAPTERS:
+            mp3s = sorted(AUDIO_DIR.glob(f"{key}_part*.mp3")) or ([AUDIO_DIR / f"{key}.mp3"] if (AUDIO_DIR / f"{key}.mp3").exists() else [])
+            if mp3s:
+                paths = []
+                for p in mp3s:
+                    r = subprocess.run(["ffprobe", "-v", "quiet", "-show_format", "-of", "json", str(p)], capture_output=True, text=True)
+                    dur = float(json.loads(r.stdout)["format"]["duration"]) if r.returncode == 0 else 0
+                    paths.append((str(p), dur))
+                segments[key] = paths
+        for dk, dc in DECISIONS.items():
+            for part in ["question", "options", "question_repeat", "options_repeat"]:
+                p = AUDIO_DIR / f"{dk}_{part}.mp3"
+                if p.exists():
+                    r = subprocess.run(["ffprobe", "-v", "quiet", "-show_format", "-of", "json", str(p)], capture_output=True, text=True)
+                    dur = float(json.loads(r.stdout)["format"]["duration"]) if r.returncode == 0 else 0
+                    segments[f"{dk}_{part}"] = [(str(p), dur)]
+    
+    print("\n🎬 Assembling video...")
+    video_path, chapters_out = assemble_video(segments)
+    
+    print("\n📝 Generating description...")
+    generate_description(chapters_out)
+    
+    print(f"\n✅ Done!")
+    print(f"   Video: {video_path}")
+    print(f"   Size: {os.path.getsize(video_path)/1e6:.1f} MB" if os.path.exists(video_path) else "")
 
 if __name__ == "__main__":
     asyncio.run(main())
