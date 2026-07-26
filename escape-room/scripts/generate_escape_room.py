@@ -19,6 +19,8 @@ import edge_tts
 parser = argparse.ArgumentParser(description="Generate Audio Escape Room Video")
 parser.add_argument("--story", "-s", default="de/letzte-schicht",
                     help="Story path relative to stories/ dir (e.g. 'de/letzte-schicht')")
+parser.add_argument("--generate", "-g", action="store_true",
+                    help="Generate a new AI story via Gemini before building")
 parser.add_argument("--skip-tts", action="store_true",
                     help="Skip TTS generation (use existing audio)")
 parser.add_argument("--preset", default="ultrafast",
@@ -29,6 +31,7 @@ args = parser.parse_args()
 PROJECT_DIR = Path(__file__).parent.parent
 SCRIPTS_DIR = PROJECT_DIR / "scripts"
 ASSETS_DIR = PROJECT_DIR / "assets"
+STORIES_DIR = PROJECT_DIR / "stories"
 
 # Load story
 STORY_PATH = Path(args.story)
@@ -316,6 +319,36 @@ async def main():
     
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # ── AI Story Generation ──────────────────────────────────
+    if args.generate:
+        print("\n🤖 Generating AI story via Gemini...")
+        gen_result = subprocess.run(
+            [sys.executable, str(SCRIPTS_DIR / "story_generator.py")],
+            capture_output=True, text=True, timeout=600,
+        )
+        print(gen_result.stdout)
+        if gen_result.returncode != 0:
+            print(f"ERROR: Story generation failed: {gen_result.stderr[:500]}")
+            return
+        # Extract generated story filename from output
+        import re as _re
+        gen_match = _re.search(r"stories/(\w+/\w+)", gen_result.stdout)
+        if gen_match:
+            story_path = gen_match.group(1)
+            print(f"  Using generated story: {story_path}")
+            # Re-import with new story
+            import importlib as _il
+            spec = _il.util.spec_from_file_location("story_data", str(STORIES_DIR / f"{story_path}.py"))
+            story_mod = _il.util.module_from_spec(spec)
+            spec.loader.exec_module(story_mod)
+            globals()["STORY"] = story_mod.STORY
+            globals()["VOICES"] = story_mod.VOICES
+            globals()["CHAPTERS"] = story_mod.CHAPTERS
+            globals()["DECISIONS"] = story_mod.DECISIONS
+            globals()["SEGMENTS"] = story_mod.SEGMENTS
+            globals()["STORY_ID"] = story_path
+            globals()["STORY_TITLE"] = story_mod.STORY.get("title", "AI-Generated Story")
     
     if not args.skip_tts:
         print("\n📢 Generating TTS audio...")
