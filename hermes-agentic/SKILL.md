@@ -57,12 +57,12 @@ Research → Script (curiosity-gap) → Pexels Videos+Images → Ken Burns → C
 
 ### Step 3: Generate TTS Audio
 
-```
-- Use edge-tts with --rate +10%
-- Voice: en-US-BrianNeural (recommended)
+Three interchangeable backends via `--tts` (default `edge`):
+- `edge` — edge-tts with --rate +10%, voice en-US-BrianNeural (free, no key)
+- `chirp` — Gemini Chirp 3 HD (natural), default voice Puck, needs GEMINI_API_KEY (see chirp_tts.py)
+- `kokoro` — local Kokoro-82M via its own venv (KOKORO_PYTHON env), default voice af_heart (see kokoro_tts.py)
 - Measure duration with ffprobe
-- Enforce 60s hard limit: ≤204 words at default rate
-```
+- Enforce 60s hard limit: ≤160 words (chirp) / ≤180 words (edge +10%)
 
 ### Step 4: Prepare Segments (Interleaved)
 
@@ -185,7 +185,7 @@ python3 youtube_analytics.py --report weekly
 
 - Python 3.10+ with Pillow, httpx, python-dotenv
 - ffmpeg + ffprobe (system)
-- edge-tts (`pip install edge-tts`)
+- One TTS backend: `edge-tts` (`pip install edge-tts`) and/or `GEMINI_API_KEY` (Chirp 3 HD) and/or kokoro venv — see "Step 3: Generate TTS Audio"
 - Pexels API key (free tier at pexels.com/api)
 - YouTube Data API v3 + OAuth client secrets
 

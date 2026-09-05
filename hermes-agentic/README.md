@@ -46,6 +46,42 @@ python3 generate_shorts_v2.py \
   --voice en-US-BrianNeural
 ```
 
+## Choose your TTS voice
+
+The generators accept `--tts` with **three interchangeable backends** — pick whatever fits
+your setup (cloud key, local model, or none):
+
+| `--tts` | Backend | Voice quality | Needs |
+|---------|---------|---------------|-------|
+| `edge` (default) | Microsoft Edge Neural (cloud, free) | good | `pip install edge-tts` |
+| `chirp` | Gemini Chirp 3 HD (cloud API) | **natural / best** | `GEMINI_API_KEY` |
+| `kokoro` | Kokoro-82M (fully local) | good, runs offline | kokoro venv (see below) |
+
+```bash
+# Chirp 3 HD (Google Gemini) — natural narration voice
+python3 generate_shorts_v2.py --query "..." --output short.mp4 --script "..." --tts chirp
+#   → voice auto-defaults to "Puck"; other Chirp voices: Kore, Charon, Leda, Fenrir, Aoede
+
+# Kokoro — local, offline (torch stays in its own venv)
+export KOKORO_PYTHON=/path/to/kokoro-venv/bin/python   # or KOKORO_VENV=/path/to/kokoro-venv
+python3 generate_shorts_v2.py --query "..." --output short.mp4 --script "..." --tts kokoro
+#   → voice auto-defaults to "af_heart"; other voices: am_michael, bf_emma, am_fenrir, ...
+
+# Edge — no key required
+python3 generate_shorts_v2.py --query "..." --output short.mp4 --script "..." --tts edge
+```
+
+Chirp requires a Gemini API key: `cp .env.example .env` → add `GEMINI_API_KEY=...`
+(the `chirp_tts.py` module is stdlib-only and reads the key from the env var or `.env`).
+
+Kokoro setup (one time, any venv): `uv venv kokoro-env && uv pip install --python
+kokoro-env/bin/python kokoro soundfile numpy` plus the spaCy model
+`en_core_web_sm` (see `kokoro_run.py` docstring for the exact wheel URL).
+
+**Word-rate calibration** differs per backend: ~2.7 words/s (chirp), ~2.7–3.0 words/s
+(edge +10%), ~2.4–2.6 words/s (kokoro natural). YouTube Shorts cap is 60 s — size your
+script accordingly.
+
 ## Driven by Hermes Agent
 
 This code is designed to be orchestrated by Hermes Agent — a self-improving AI agent
@@ -74,7 +110,8 @@ The agentic approach replaces fixed scripts with:
 
 - Python 3.10+
 - ffmpeg + ffprobe
-- edge-tts
+- One TTS backend: `edge-tts` (default, free) and/or `GEMINI_API_KEY` for Chirp 3 HD
+  and/or a local kokoro venv — see "Choose your TTS voice"
 - Pexels API key (free tier)
 - YouTube Data API v3 with OAuth
 - Pillow, httpx, python-dotenv

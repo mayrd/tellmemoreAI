@@ -236,16 +236,33 @@ def step_ken_burns(
     return result
 
 
-def step_generate_tts(script_text: str, voice: str) -> Tuple[str, float]:
-    """Generate TTS audio using edge-tts.
+def step_generate_tts(script_text: str, voice: str, tts: str = "edge") -> Tuple[str, float]:
+    """Generate TTS audio using edge-tts (default) or Gemini Chirp 3 HD (--tts chirp).
 
     Args:
-        text: Script text for voiceover.
-        voice: edge-tts voice name.
+        script_text: Script text for voiceover.
+        voice: edge-tts voice name (or Chirp 3 voice for --tts chirp).
+        tts: 'edge' or 'chirp'.
 
     Returns:
         Tuple of (audio_path, duration_seconds).
     """
+    if tts == "chirp":
+        import chirp_tts
+        audio_path = tempfile.mktemp(prefix="shorts_tts_", suffix=".mp3")
+        print(f"  Generating Chirp 3 TTS ({voice})...")
+        audio_path, duration = chirp_tts.synthesize(script_text, voice=voice, output_path=audio_path)
+        print(f"  TTS audio: {duration:.1f}s -> {audio_path}")
+        return audio_path, duration
+
+    if tts == "kokoro":
+        import kokoro_tts
+        audio_path = tempfile.mktemp(prefix="shorts_tts_", suffix=".mp3")
+        print(f"  Generating Kokoro TTS ({voice})...")
+        audio_path, duration = kokoro_tts.synthesize(script_text, voice=voice, output_path=audio_path)
+        print(f"  TTS audio: {duration:.1f}s -> {audio_path}")
+        return audio_path, duration
+
     audio_path = tempfile.mktemp(prefix="shorts_tts_", suffix=".mp3")
     print(f"  Generating TTS ({voice})...")
 
@@ -702,6 +719,7 @@ def generate_shorts(
     output_path: str,
     script_text: Optional[str] = None,
     voice: str = DEFAULT_VOICE,
+    tts: str = "edge",
     n_images: int = 6,
     n_videos: int = 0,
     segment_duration: float = DEFAULT_SEGMENT_DURATION,
@@ -753,7 +771,7 @@ def generate_shorts(
 
         # ── Step 2: Generate TTS audio ──
         audio_path, audio_duration = timer.run(
-            "Generate TTS audio", step_generate_tts, script_text, voice
+            "Generate TTS audio", step_generate_tts, script_text, voice, tts
         )
 
         # Adjust segment duration to fit audio
@@ -841,7 +859,9 @@ Examples:
     parser.add_argument("--query", required=True, help="Topic/keywords for Pexels search")
     parser.add_argument("--output", "-o", default="short_output.mp4", help="Output MP4 path")
     parser.add_argument("--script", default=None, help="Custom TTS script text")
-    parser.add_argument("--voice", default=DEFAULT_VOICE, help=f"TTS voice (default: {DEFAULT_VOICE})")
+    parser.add_argument("--voice", default=DEFAULT_VOICE, help=f"TTS voice (default: {DEFAULT_VOICE}; chirp voices: Puck, Kore, Charon, ...; kokoro voices: af_heart, am_michael, bf_emma, ...)")
+    parser.add_argument("--tts", default="edge", choices=["edge", "chirp", "kokoro"],
+                        help="TTS backend: edge (Microsoft Neural), chirp (Gemini Chirp 3 HD, default voice Puck) or kokoro (local, default voice af_heart)")
     parser.add_argument("--images", type=int, default=6, help="Number of images (default: 6)")
     parser.add_argument("--videos", type=int, default=0, help="Number of videos (default: 0)")
     parser.add_argument("--segment-duration", type=float, default=DEFAULT_SEGMENT_DURATION)
@@ -857,6 +877,10 @@ Examples:
 
     resolution = (args.width, args.height)
     zoom_range = (args.zoom_start, args.zoom_end)
+    if args.tts == "chirp" and args.voice == DEFAULT_VOICE:
+        args.voice = "Puck"
+    if args.tts == "kokoro" and args.voice == DEFAULT_VOICE:
+        args.voice = "af_heart"
 
     print(f"generate_shorts.py — YouTube Shorts Pipeline")
     print(f"  Query: {args.query}")
@@ -864,7 +888,7 @@ Examples:
     print(f"  Resolution: {resolution[0]}x{resolution[1]}@{args.fps}fps")
     print(f"  Images: {args.images}, Videos: {args.videos}")
     print(f"  Segment: {args.segment_duration}s, Crossfade: {args.crossfade}s")
-    print(f"  Zoom: {zoom_range}, Voice: {args.voice}")
+    print(f"  Zoom: {zoom_range}, TTS: {args.tts}, Voice: {args.voice}")
 
     try:
         result = generate_shorts(
@@ -872,6 +896,7 @@ Examples:
             output_path=args.output,
             script_text=args.script,
             voice=args.voice,
+            tts=args.tts,
             n_images=args.images,
             n_videos=args.videos,
             segment_duration=args.segment_duration,

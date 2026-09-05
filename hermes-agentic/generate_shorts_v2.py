@@ -46,6 +46,9 @@ DEFAULT_FPS = 24
 DEFAULT_CROSSFADE_DURATION = 0.5
 DEFAULT_KB_ZOOM = (1.0, 1.08)
 DEFAULT_VOICE = "en-US-BrianNeural"
+DEFAULT_TTS = "edge"  # edge | chirp | kokoro — TTS backend selector
+CHIRP_VOICE = "Puck"
+KOKORO_VOICE = "af_heart"
 DEFAULT_N_IMAGES = 6
 DEFAULT_N_VIDEOS = 2
 EDGE_TTS_PATH = os.environ.get("EDGE_TTS_PATH", "/opt/data/home/.local/bin/edge-tts")
@@ -202,12 +205,30 @@ def step_fetch_mixed_assets(query: str, n_images: int = 6, n_videos: int = 2) ->
 # Step 2: Generate TTS audio
 # ══════════════════════════════════════════════════════════════
 
-def step_generate_tts(script_text: str, voice: str) -> Tuple[str, float]:
-    """Generate TTS audio using edge-tts.
+def step_generate_tts(script_text: str, voice: str, tts: str = DEFAULT_TTS) -> Tuple[str, float]:
+    """Generate TTS audio using edge-tts (default), Gemini Chirp 3 HD (--tts chirp) or local Kokoro (--tts kokoro).
 
     Returns:
         Tuple of (audio_path, duration_seconds).
     """
+    if tts == "chirp":
+        import chirp_tts
+        audio_path = tempfile.mktemp(prefix="shorts_v2_tts_", suffix=".mp3")
+        print(f"  Generating Chirp 3 TTS ({voice})...")
+        print(f"  Script: {script_text[:100]}...")
+        audio_path, duration = chirp_tts.synthesize(script_text, voice=voice, output_path=audio_path)
+        print(f"  TTS audio: {duration:.1f}s -> {audio_path}")
+        return audio_path, duration
+
+    if tts == "kokoro":
+        import kokoro_tts
+        audio_path = tempfile.mktemp(prefix="shorts_v2_tts_", suffix=".mp3")
+        print(f"  Generating Kokoro TTS ({voice})...")
+        print(f"  Script: {script_text[:100]}...")
+        audio_path, duration = kokoro_tts.synthesize(script_text, voice=voice, output_path=audio_path)
+        print(f"  TTS audio: {duration:.1f}s -> {audio_path}")
+        return audio_path, duration
+
     audio_path = tempfile.mktemp(prefix="shorts_v2_tts_", suffix=".mp3")
     print(f"  Generating TTS ({voice})...")
     print(f"  Script: {script_text[:100]}...")
@@ -362,7 +383,7 @@ def step_prepare_segments(
                 z_start, z_end = ze, zs
             print(f"  Segment {i}: [IMAGE] Ken Burns {os.path.basename(src_path)} zoom={z_start}->{z_end}")
             _ken_burns_image(src_path, seg_path, segment_duration,
-                             z_start, z_end, resolution, fps=30)
+                             z_start, z_end, resolution, fps=fps)
 
         segments.append({"type": seg_type, "path": seg_path, "duration": segment_duration})
 
@@ -854,6 +875,7 @@ def generate_shorts_v2(
     output_path: str,
     script_text: Optional[str] = None,
     voice: str = DEFAULT_VOICE,
+    tts: str = DEFAULT_TTS,
     n_images: int = DEFAULT_N_IMAGES,
     n_videos: int = DEFAULT_N_VIDEOS,
     segment_duration: float = 3.5,
@@ -909,7 +931,7 @@ def generate_shorts_v2(
 
         # ── Step 2: Generate TTS ──
         audio_path, audio_duration = timer.run(
-            "Generate TTS", step_generate_tts, script_text, voice
+            "Generate TTS", step_generate_tts, script_text, voice, tts
         )
         tmp_files.append(audio_path)
 
@@ -1002,7 +1024,9 @@ Examples:
     parser.add_argument("--query", required=True, help="Topic/keywords for Pexels search")
     parser.add_argument("--output", "-o", default="short_v2_output.mp4")
     parser.add_argument("--script", default=None, help="Custom TTS script text")
-    parser.add_argument("--voice", default=DEFAULT_VOICE, help=f"TTS voice (default: {DEFAULT_VOICE})")
+    parser.add_argument("--voice", default=DEFAULT_VOICE, help=f"TTS voice (default: {DEFAULT_VOICE}; chirp voices: Puck, Kore, Charon, ...; kokoro voices: af_heart, am_michael, bf_emma, ...)")
+    parser.add_argument("--tts", default=DEFAULT_TTS, choices=["edge", "chirp", "kokoro"],
+                        help=f"TTS backend: edge (Microsoft Neural), chirp (Gemini Chirp 3 HD, default voice {CHIRP_VOICE}) or kokoro (local, default voice {KOKORO_VOICE})")
     parser.add_argument("--images", type=int, default=DEFAULT_N_IMAGES, help=f"Number of images (default: {DEFAULT_N_IMAGES})")
     parser.add_argument("--videos", type=int, default=DEFAULT_N_VIDEOS, help=f"Number of videos (default: {DEFAULT_N_VIDEOS})")
     parser.add_argument("--segment-duration", type=float, default=3.5)
@@ -1017,6 +1041,10 @@ Examples:
     args = parser.parse_args()
     resolution = (args.width, args.height)
     zoom_range = (args.zoom_start, args.zoom_end)
+    if args.tts == "chirp" and args.voice == DEFAULT_VOICE:
+        args.voice = CHIRP_VOICE
+    if args.tts == "kokoro" and args.voice == DEFAULT_VOICE:
+        args.voice = KOKORO_VOICE
 
     print(f"generate_shorts_v2.py — YouTube Shorts Builder v2")
     print(f"  Query: {args.query}")
@@ -1024,7 +1052,7 @@ Examples:
     print(f"  Resolution: {resolution[0]}x{resolution[1]}@{args.fps}fps")
     print(f"  Images: {args.images}, Videos: {args.videos}")
     print(f"  Segment: {args.segment_duration}s, Crossfade: {args.crossfade}s")
-    print(f"  Zoom: {zoom_range}, Voice: {args.voice}")
+    print(f"  Zoom: {zoom_range}, TTS: {args.tts}, Voice: {args.voice}")
 
     try:
         result = generate_shorts_v2(
@@ -1032,6 +1060,7 @@ Examples:
             output_path=args.output,
             script_text=args.script,
             voice=args.voice,
+            tts=args.tts,
             n_images=args.images,
             n_videos=args.videos,
             segment_duration=args.segment_duration,
