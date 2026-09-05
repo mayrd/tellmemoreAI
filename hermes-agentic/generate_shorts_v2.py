@@ -229,6 +229,15 @@ def step_generate_tts(script_text: str, voice: str, tts: str = DEFAULT_TTS) -> T
         print(f"  TTS audio: {duration:.1f}s -> {audio_path}")
         return audio_path, duration
 
+    if tts == "chatterbox":
+        import chatterbox_tts
+        audio_path = tempfile.mktemp(prefix="shorts_v2_tts_", suffix=".mp3")
+        print(f"  Generating Chatterbox TTS (GPU recommended)...")
+        print(f"  Script: {script_text[:100]}...")
+        audio_path, duration = chatterbox_tts.synthesize(script_text, voice=voice, output_path=audio_path)
+        print(f"  TTS audio: {duration:.1f}s -> {audio_path}")
+        return audio_path, duration
+
     audio_path = tempfile.mktemp(prefix="shorts_v2_tts_", suffix=".mp3")
     print(f"  Generating TTS ({voice})...")
     print(f"  Script: {script_text[:100]}...")
@@ -1024,9 +1033,9 @@ Examples:
     parser.add_argument("--query", required=True, help="Topic/keywords for Pexels search")
     parser.add_argument("--output", "-o", default="short_v2_output.mp4")
     parser.add_argument("--script", default=None, help="Custom TTS script text")
-    parser.add_argument("--voice", default=DEFAULT_VOICE, help=f"TTS voice (default: {DEFAULT_VOICE}; chirp voices: Puck, Kore, Charon, ...; kokoro voices: af_heart, am_michael, bf_emma, ...)")
-    parser.add_argument("--tts", default=DEFAULT_TTS, choices=["edge", "chirp", "kokoro"],
-                        help=f"TTS backend: edge (Microsoft Neural), chirp (Gemini Chirp 3 HD, default voice {CHIRP_VOICE}) or kokoro (local, default voice {KOKORO_VOICE})")
+    parser.add_argument("--voice", default=DEFAULT_VOICE, help=f"TTS voice (default: {DEFAULT_VOICE}; chirp voices: Puck, Kore, Charon, ...; kokoro voices: af_heart, am_michael, ...; chatterbox: optional path to a reference WAV for voice cloning)")
+    parser.add_argument("--tts", default=DEFAULT_TTS, choices=["edge", "chirp", "kokoro", "chatterbox"],
+                        help=f"TTS backend: edge (Microsoft Neural), chirp (Gemini Chirp 3 HD, default voice {CHIRP_VOICE}), kokoro (local, default voice {KOKORO_VOICE}) or chatterbox (local, GPU recommended; CHATTERBOX_PYTHON/CHATTERBOX_MODEL env)")
     parser.add_argument("--images", type=int, default=DEFAULT_N_IMAGES, help=f"Number of images (default: {DEFAULT_N_IMAGES})")
     parser.add_argument("--videos", type=int, default=DEFAULT_N_VIDEOS, help=f"Number of videos (default: {DEFAULT_N_VIDEOS})")
     parser.add_argument("--segment-duration", type=float, default=3.5)

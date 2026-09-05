@@ -56,6 +56,7 @@ your setup (cloud key, local model, or none):
 | `edge` (default) | Microsoft Edge Neural (cloud, free) | good | `pip install edge-tts` |
 | `chirp` | Gemini Chirp 3 HD (cloud API) | **natural / best** | `GEMINI_API_KEY` |
 | `kokoro` | Kokoro-82M (fully local) | good, runs offline | kokoro venv (see below) |
+| `chatterbox` | Chatterbox / Chatterbox-Turbo (local) | very natural, voice cloning | chatterbox venv + **CUDA GPU recommended** (CPU is 14–65× realtime) |
 
 ```bash
 # Chirp 3 HD (Google Gemini) — natural narration voice
@@ -67,9 +68,20 @@ export KOKORO_PYTHON=/path/to/kokoro-venv/bin/python   # or KOKORO_VENV=/path/to
 python3 generate_shorts_v2.py --query "..." --output short.mp4 --script "..." --tts kokoro
 #   → voice auto-defaults to "af_heart"; other voices: am_michael, bf_emma, am_fenrir, ...
 
+# Chatterbox — local, GPU recommended (voice cloning via reference clip)
+export CHATTERBOX_PYTHON=/path/to/chatterbox-venv/bin/python   # or CHATTERBOX_VENV=...
+export CHATTERBOX_MODEL=turbo        # turbo (default, 350M, fast) or default (500M, highest quality)
+export CHATTERBOX_DEVICE=cuda        # cuda (recommended) or cpu
+python3 generate_shorts_v2.py --query "..." --output short.mp4 --script "..." --tts chatterbox
+#   → built-in voice; clone a voice by passing --voice /path/to/reference.wav (10s+ clean speech)
+
 # Edge — no key required
 python3 generate_shorts_v2.py --query "..." --output short.mp4 --script "..." --tts edge
 ```
+
+Chatterbox venv setup (one time): `uv venv chatterbox-env && uv pip install --python
+chatterbox-env/bin/python chatterbox-tts`. The adapter auto-patches the missing
+proprietary watermarker to a no-op dummy (see `chatterbox_run.py`). MIT-licensed.
 
 Chirp requires a Gemini API key: `cp .env.example .env` → add `GEMINI_API_KEY=...`
 (the `chirp_tts.py` module is stdlib-only and reads the key from the env var or `.env`).

@@ -263,6 +263,14 @@ def step_generate_tts(script_text: str, voice: str, tts: str = "edge") -> Tuple[
         print(f"  TTS audio: {duration:.1f}s -> {audio_path}")
         return audio_path, duration
 
+    if tts == "chatterbox":
+        import chatterbox_tts
+        audio_path = tempfile.mktemp(prefix="shorts_tts_", suffix=".mp3")
+        print(f"  Generating Chatterbox TTS (GPU recommended)...")
+        audio_path, duration = chatterbox_tts.synthesize(script_text, voice=voice, output_path=audio_path)
+        print(f"  TTS audio: {duration:.1f}s -> {audio_path}")
+        return audio_path, duration
+
     audio_path = tempfile.mktemp(prefix="shorts_tts_", suffix=".mp3")
     print(f"  Generating TTS ({voice})...")
 
@@ -859,9 +867,9 @@ Examples:
     parser.add_argument("--query", required=True, help="Topic/keywords for Pexels search")
     parser.add_argument("--output", "-o", default="short_output.mp4", help="Output MP4 path")
     parser.add_argument("--script", default=None, help="Custom TTS script text")
-    parser.add_argument("--voice", default=DEFAULT_VOICE, help=f"TTS voice (default: {DEFAULT_VOICE}; chirp voices: Puck, Kore, Charon, ...; kokoro voices: af_heart, am_michael, bf_emma, ...)")
-    parser.add_argument("--tts", default="edge", choices=["edge", "chirp", "kokoro"],
-                        help="TTS backend: edge (Microsoft Neural), chirp (Gemini Chirp 3 HD, default voice Puck) or kokoro (local, default voice af_heart)")
+    parser.add_argument("--voice", default=DEFAULT_VOICE, help=f"TTS voice (default: {DEFAULT_VOICE}; chirp voices: Puck, Kore, Charon, ...; kokoro voices: af_heart, am_michael, ...; chatterbox: optional path to a reference WAV for voice cloning)")
+    parser.add_argument("--tts", default="edge", choices=["edge", "chirp", "kokoro", "chatterbox"],
+                        help="TTS backend: edge (Microsoft Neural), chirp (Gemini Chirp 3 HD, default voice Puck), kokoro (local, default voice af_heart) or chatterbox (local, GPU recommended)")
     parser.add_argument("--images", type=int, default=6, help="Number of images (default: 6)")
     parser.add_argument("--videos", type=int, default=0, help="Number of videos (default: 0)")
     parser.add_argument("--segment-duration", type=float, default=DEFAULT_SEGMENT_DURATION)
