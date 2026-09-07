@@ -513,10 +513,178 @@ def _build_teleprompter_frame(
     return img
 
 
+def _run_silencedetect(audio_path: str, noise_db: float, min_duration: float) -> List[Tuple[float, float]]:
+    """Single silencedetect pass; returns (start, end) pauses or [] on failure."""
+    try:
+        cmd = [
+            "ffmpeg", "-i", audio_path,
+            "-af", f"silencedetect=noise={noise_db}dB:d={min_duration}",
+            "-f", "null", "-",
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        starts: List[float] = []
+        ends: List[float] = []
+        for line in result.stderr.splitlines():
+            if "silence_start" in line:
+                starts.append(float(line.split("silence_start: ")[1].strip()))
+            elif "silence_end" in line:
+                ends.append(float(line.split("silence_end: ")[1].split("|")[0].strip()))
+        pauses = []
+        for i, s in enumerate(starts):
+            e = ends[i] if i < len(ends) else s + min_duration
+            pauses.append((s, e))
+        # Merge pauses separated by only a sliver of speech (< 0.15s)
+        merged = []
+        for p in pauses:
+            if merged and p[0] - merged[-1][1] < 0.15:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], p[1]))
+            else:
+                merged.append(p)
+        return merged
+    except Exception:
+        return []
+
+
+def _detect_pauses(audio_path: str, min_duration: float = 0.22) -> List[Tuple[float, float]]:
+    """Detect real pauses (silences) in the TTS audio via ffmpeg silencedetect.
+
+    The threshold is adaptive: TTS backends normalize to very different levels
+    (Chatterbox ≈ −1 dB peak, edge-tts ≈ −4 dB peak), so a fixed absolute dB
+    floor misses pauses on quieter output. Tries −32 → −42 → −50 dB and returns
+    the first pass that finds pauses. Returns [] if the audio cannot be analyzed
+    or contains no pauses >= min_duration.
+    """
+    for noise_db in (-32.0, -42.0, -50.0):
+        pauses = _run_silencedetect(audio_path, noise_db, min_duration)
+        if pauses:
+            return pauses
+    return []
+
+
+def _is_phrase_end(word: str) -> bool:
+    """True if the word terminates a display phrase (any of , ; : . ! ? …)."""
+    stripped = word.strip('"\'”’)]}')
+    if not stripped:
+        return False
+    return stripped[-1] in ',;:.!?…'
+
+
+def _is_sentence_end(word: str) -> bool:
+    """True if the word terminates a sentence ('.', '!', '?', '…')."""
+    stripped = word.strip('"\'”’)]}')
+    return stripped.endswith(('.', '!', '?', '…')) or stripped.endswith('."') or stripped.endswith('!"') or stripped.endswith('?"')
+
+
+
+def _build_word_times(words: List[str], audio_duration: float,
+                      pauses: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+    """Word-level timing, anchored to real audio pauses.
+
+    Baseline: each word gets an equal slot; punctuation pauses are absorbed into
+    the last word of a phrase (0.35s sentence, 0.20s comma) so ranges stay
+    contiguous. The whole timeline is then rescaled to audio_duration.
+
+    Anchoring: sentence-final words whose (linear) end time falls close to a real
+    pause in the audio are pinned to that pause — the sentence ends exactly when
+    the speech ends, and the next sentence starts when speech resumes. Between
+    anchors the timeline is rescaled piecewise-linearly, which removes the
+    accumulating drift that pure linear timing produces on voices that pace
+    pauses unevenly (measured: Chatterbox Snoop clone, 2026-09-07).
+    """
+    n = len(words)
+    if n == 0 or audio_duration <= 0:
+        return []
+
+    # ── Baseline linear slots (identical to pre-anchor behaviour) ──
+    base = audio_duration / n
+    raw_ends: List[float] = []
+    cum = 0.0
+    for w in words:
+        if _is_sentence_end(w):
+            cum += base + 0.35
+        elif w.endswith((',', ';', ':', '—', '-')) or w.endswith((',"', ';"', ':"')):
+            cum += base + 0.20
+        else:
+            cum += base
+        raw_ends.append(cum)
+    if raw_ends[-1] <= 0:
+        return [(0.0, audio_duration)] * n
+    scale = audio_duration / raw_ends[-1]
+    lin_ends = [e * scale for e in raw_ends]
+
+    # ── Anchor phrase-final words to real pauses ──
+    # Anchor candidates are ALL phrase endings (commas, colons AND sentence
+    # ends) because voices like the Snoop clone pause after commas too.
+    phrase_idxs = [i for i, w in enumerate(words) if _is_phrase_end(w)]
+    anchor_idx: List[int] = []          # word indices pinned to a pause
+    anchor_pause: List[Tuple[float, float]] = []  # matching pause (start, end)
+    pi = 0
+    for si in phrase_idxs:
+        # Linear estimate of where this phrase boundary lands
+        est = lin_ends[si]
+        # Find the first unused pause at/after this estimate (tolerance ±1.5s)
+        while pi < len(pauses) and pauses[pi][1] < est - 1.5:
+            pi += 1
+        if pi < len(pauses):
+            p_start, p_end = pauses[pi]
+            # Skip trailing pauses (audio ends right after them): pinning them
+            # to a non-final word would squeeze the remaining words into the
+            # final silence. The last caption legitimately stays visible to D.
+            if p_end > audio_duration - 0.15:
+                pi += 1
+                continue
+            if abs(p_start - est) <= 1.5:
+                anchor_idx.append(si)
+                anchor_pause.append((p_start, p_end))
+                pi += 1
+
+    # ── Distribute word slots per speech block (anchors = real pauses) ──
+    # Each anchor pins a phrase-final word to the START of a real pause. Words
+    # between two anchors live in the speech window [pause_end, next_pause_start]
+    # — pauses become REAL gaps (no caption word ever covers silence) and each
+    # block's words are scaled to that block's actual speech time, so fast or
+    # slow sentences get proportional slots instead of a global average.
+    if not anchor_idx:
+        # No anchors (no pauses found or none matched): pure linear fallback
+        word_times = [(0.0 if i == 0 else lin_ends[i - 1], lin_ends[i])
+                      for i in range(n)]
+        return word_times
+
+    # Speech blocks: (first_word_idx, last_word_idx, window_start, window_end)
+    blocks: List[Tuple[int, int, float, float]] = []
+    prev_word = 0
+    prev_t = 0.0
+    for k, ai in enumerate(anchor_idx):
+        blocks.append((prev_word, ai, prev_t, anchor_pause[k][0]))
+        prev_word = ai + 1
+        prev_t = anchor_pause[k][1]
+    if prev_word < n:
+        blocks.append((prev_word, n - 1, prev_t, audio_duration))
+
+    word_times: List[Tuple[float, float]] = []
+    for (w0, w1, t0, t1) in blocks:
+        r0 = raw_ends[w0 - 1] if w0 > 0 else 0.0
+        span = raw_ends[w1] - r0
+        if span <= 0:
+            span = 1.0
+        for i in range(w0, w1 + 1):
+            end = t0 + (raw_ends[i] - r0) / span * (t1 - t0)
+            if i == 0:
+                start = 0.0
+            elif i == w0 and w0 > 0:
+                # First word after an anchored pause: starts when speech resumes
+                start = t0
+            else:
+                start = word_times[-1][1]
+            word_times.append((start, max(end, start)))
+    return word_times
+
+
 def step_render_captions(
     script_text: str,
     audio_duration: float,
     resolution: Tuple[int, int],
+    audio_path: Optional[str] = None,
 ) -> str:
     """Render caption overlay as transparent PNG sequence → qtrle video with alpha.
 
@@ -573,25 +741,13 @@ def step_render_captions(
     # Each word gets an equal slot. Punctuation pauses are absorbed into the
     # last word of a phrase so there are NO gaps between word ranges.
     # This prevents get_active_line from jumping back to word 0.
-    word_times = []
-    cum = 0.0
-    base = audio_duration / n_words
-    for i, word in enumerate(words):
-        has_period = word.endswith('.') or word.endswith('!') or word.endswith('?')
-        has_comma = word.endswith(',') or word.endswith(';') or word.endswith(':')
-        if has_period or has_comma:
-            # Last word in phrase: extend its slot to include the pause
-            extra = 0.35 if has_period else 0.2
-            word_times.append((cum, cum + base + extra))
-            cum += base + extra
-        else:
-            word_times.append((cum, cum + base))
-            cum += base
-
-    # Scale to fit exact audio duration
-    if cum > 0:
-        scale = audio_duration / cum
-        word_times = [(t[0] * scale, t[1] * scale) for t in word_times]
+    # When the real TTS audio file is available, sentence boundaries are
+    # additionally ANCHORED to the pauses detected in that audio (silencedetect),
+    # so captions stay inside the actual speech spans instead of drifting.
+    pauses = _detect_pauses(audio_path) if audio_path else []
+    word_times = _build_word_times(words, audio_duration, pauses)
+    print(f"  Pauses detected: {len(pauses)}"
+          + (" → word timing pause-anchored" if pauses else " → word timing linear (no pauses found)"))
 
     def get_active_line(t: float) -> int:
         """Find which display line is active at time t (based on word timing)."""
@@ -810,7 +966,7 @@ def generate_shorts(
         caption_video = timer.run(
             "Render captions",
             step_render_captions,
-            script_text, audio_duration, resolution,
+            script_text, audio_duration, resolution, audio_path,
         )
 
         # ── Step 5: Final compose (video + captions + audio) ──
