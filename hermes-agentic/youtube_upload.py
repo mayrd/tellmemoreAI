@@ -46,8 +46,7 @@ def upload_video(filepath, title, description="", tags=None):
     status = {
         "privacyStatus": "public",
         "selfDeclaredMadeForKids": False,
-        "containsSyntheticAudio": True,
-        "containsSyntheticVideo": True,
+        "containsSyntheticMedia": True,
     }
     
     boundary = "YouTubeUploadBoundary42"
