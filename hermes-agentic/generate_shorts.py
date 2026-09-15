@@ -577,35 +577,45 @@ def _is_sentence_end(word: str) -> bool:
 
 
 def _build_word_times(words: List[str], audio_duration: float,
-                      pauses: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+                      pauses: List[Tuple[float, float]],
+                      micro: Optional[List[Tuple[float, float]]] = None,
+                      anchor_words: Optional[List[int]] = None) -> List[Tuple[float, float]]:
     """Word-level timing, anchored to real audio pauses.
 
-    Baseline: each word gets an equal slot; punctuation pauses are absorbed into
-    the last word of a phrase (0.35s sentence, 0.20s comma) so ranges stay
-    contiguous. The whole timeline is then rescaled to audio_duration.
+    Baseline: each word gets a slot weighted by its LENGTH (long words take
+    longer to speak than "and" — a plain equal-slot split drifts by >1s inside
+    long speech blocks, measured 2026-09-15); punctuation pauses are absorbed
+    into the last word of a phrase so ranges stay contiguous. The timeline is
+    rescaled to audio_duration.
 
-    Anchoring: sentence-final words whose (linear) end time falls close to a real
-    pause in the audio are pinned to that pause — the sentence ends exactly when
-    the speech ends, and the next sentence starts when speech resumes. Between
-    anchors the timeline is rescaled piecewise-linearly, which removes the
-    accumulating drift that pure linear timing produces on voices that pace
-    pauses unevenly (measured: Chatterbox Snoop clone, 2026-09-07).
+    Anchoring: every phrase-final word (`,` `;` `:` `.` `!` `?`) is pinned to a
+    real pause in the audio. `micro` (pauses >= ~0.05s) is preferred when given:
+    the Snoop clone marks phrase boundaries with 60-110ms micro-pauses, and the
+    coarse 0.22s list misses ALL of them inside a long block — that was the
+    "captions run ~1-1.8s ahead" bug (2026-09-15). Falls back to the coarse
+    pause list, then to linear timing.
+
+    ⚠️ Measured drift this fixes (2026-09-15 archaeology Short, 61 words):
+    "across ancient Britain," was spoken at ~3.8s but captioned from ~2.0s.
     """
     n = len(words)
     if n == 0 or audio_duration <= 0:
         return []
 
-    # ── Baseline linear slots (identical to pre-anchor behaviour) ──
+    # ── Baseline slots: length-weighted (characters correlate with speech time) ──
     base = audio_duration / n
     raw_ends: List[float] = []
     cum = 0.0
     for w in words:
+        # 3-char words ~1 unit, 8-char words ~1.6 units (sub-linear: long words
+        # are not spoken proportionally slower, but noticeably slower than "a").
+        weight = base * (max(len(w.strip('.,;:!?"\'')), 2) / 4.2) ** 0.7
         if _is_sentence_end(w):
-            cum += base + 0.35
+            cum += weight + 0.35
         elif w.endswith((',', ';', ':', '—', '-')) or w.endswith((',"', ';"', ':"')):
-            cum += base + 0.20
+            cum += weight + 0.20
         else:
-            cum += base
+            cum += weight
         raw_ends.append(cum)
     if raw_ends[-1] <= 0:
         return [(0.0, audio_duration)] * n
@@ -613,30 +623,70 @@ def _build_word_times(words: List[str], audio_duration: float,
     lin_ends = [e * scale for e in raw_ends]
 
     # ── Anchor phrase-final words to real pauses ──
-    # Anchor candidates are ALL phrase endings (commas, colons AND sentence
-    # ends) because voices like the Snoop clone pause after commas too.
-    phrase_idxs = [i for i, w in enumerate(words) if _is_phrase_end(w)]
+    # Anchor candidates = the words where the VISIBLE caption changes. That is
+    # every sentence/comma end (`,` `;` `:` `.` `!` `?`) AND every display-chunk
+    # boundary passed in via `anchor_words` (the renderer splits the script into
+    # 3-4 word caption chunks; their boundaries need anchors too, otherwise the
+    # captions inside a long speech block are only interpolated).
+    # Prefer the fine-grained (micro) pause list when available.
+    pool = micro if micro else pauses
+    if anchor_words is not None:
+        phrase_idxs = sorted(set(anchor_words) | {i for i, w in enumerate(words) if _is_phrase_end(w)})
+    else:
+        phrase_idxs = [i for i, w in enumerate(words) if _is_phrase_end(w)]
     anchor_idx: List[int] = []          # word indices pinned to a pause
     anchor_pause: List[Tuple[float, float]] = []  # matching pause (start, end)
     pi = 0
+    prev_anchored_word = -1
     for si in phrase_idxs:
         # Linear estimate of where this phrase boundary lands
         est = lin_ends[si]
-        # Find the first unused pause at/after this estimate (tolerance ±1.5s)
-        while pi < len(pauses) and pauses[pi][1] < est - 1.5:
+        tol = 1.0 if micro else 1.6
+        if anchor_words is not None:
+            tol = min(tol, 0.85)    # dense anchors: keep them tight & honest
+        while pi < len(pool) and pool[pi][1] < est - tol:
             pi += 1
-        if pi < len(pauses):
-            p_start, p_end = pauses[pi]
-            # Skip trailing pauses (audio ends right after them): pinning them
-            # to a non-final word would squeeze the remaining words into the
-            # final silence. The last caption legitimately stays visible to D.
-            if p_end > audio_duration - 0.15:
-                pi += 1
+        if pi >= len(pool):
+            break
+        # Among the pauses inside the tolerance window pick the best one:
+        # longer pauses win (they are real boundaries), with a mild preference
+        # for the one closest to the estimate.
+        best = None
+        best_score = -1.0
+        for k in range(pi, len(pool)):
+            p_start, p_end = pool[k]
+            if p_start - est > tol:
+                break
+            dur = p_end - p_start
+            score = dur - 0.25 * abs(p_start - est)
+            if p_end > audio_duration - 0.15:   # trailing pause: never an anchor
                 continue
-            if abs(p_start - est) <= 1.5:
-                anchor_idx.append(si)
-                anchor_pause.append((p_start, p_end))
-                pi += 1
+            if score > best_score:
+                best_score = score
+                best = k
+        if best is None:
+            continue
+        p_start, p_end = pool[best]
+        anchor_idx.append(si)
+        anchor_pause.append((p_start, p_end))
+        pi = best + 1
+
+    # ── Plausibility filter ──
+    # Drop anchors that would squeeze a chunk into less time than speech can
+    # plausibly need (~0.11s per word). Without this, two micro-pauses lying
+    # close together produce a 0.2s block for three words — the caption then
+    # flickers through several chunks instantly (seen 2026-09-15).
+    keep_idx: List[int] = []
+    keep_pause: List[Tuple[float, float]] = []
+    prev_w, prev_t = 0, 0.0
+    for ai, (ps, pe) in zip(anchor_idx, anchor_pause):
+        need = 0.11 * (ai + 1 - prev_w)
+        if ps - prev_t < max(need, 0.18):
+            continue
+        keep_idx.append(ai)
+        keep_pause.append((ps, pe))
+        prev_w, prev_t = ai + 1, pe
+    anchor_idx, anchor_pause = keep_idx, keep_pause
 
     # ── Distribute word slots per speech block (anchors = real pauses) ──
     # Each anchor pins a phrase-final word to the START of a real pause. Words
@@ -745,9 +795,19 @@ def step_render_captions(
     # additionally ANCHORED to the pauses detected in that audio (silencedetect),
     # so captions stay inside the actual speech spans instead of drifting.
     pauses = _detect_pauses(audio_path) if audio_path else []
-    word_times = _build_word_times(words, audio_duration, pauses)
+    # Fine-grained pause list (2026-09-15): the Snoop clone separates phrases
+    # with 60-110ms micro-pauses; the coarse 0.22s list saw none of them inside
+    # a long speech block, so captions ran up to ~1.8s ahead of the voice.
+    micro = _detect_pauses(audio_path, min_duration=0.05) if audio_path else []
+    if micro and pauses and len(micro) <= len(pauses):
+        micro = []
+    # Words where the VISIBLE caption changes = last word of each display chunk.
+    line_end_words = [i for i in range(len(word_to_line) - 1)
+                      if word_to_line[i] != word_to_line[i + 1]]
+    word_times = _build_word_times(words, audio_duration, pauses, micro, line_end_words)
     print(f"  Pauses detected: {len(pauses)}"
-          + (" → word timing pause-anchored" if pauses else " → word timing linear (no pauses found)"))
+          + (f" (+{len(micro)} micro-pauses for anchoring)" if micro else "")
+          + (" → word timing pause-anchored" if (pauses or micro) else " → word timing linear (no pauses found)"))
 
     def get_active_line(t: float) -> int:
         """Find which display line is active at time t (based on word timing)."""
