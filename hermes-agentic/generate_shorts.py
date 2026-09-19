@@ -576,6 +576,61 @@ def _is_sentence_end(word: str) -> bool:
 
 
 
+def _anchor_words_dp(words: List[str], lin_ends: List[float],
+                     pool: List[Tuple[float, float]],
+                     audio_duration: float) -> List[Tuple[int, Tuple[float, float]]]:
+    """Match word ends to real pauses with a monotone DP (minimum total drift).
+
+    Why: the greedy per-boundary match (find *some* pause near the estimate) binds
+    a chunk to the wrong pause when the voice stretches the hook — measured
+    2026-09-19 on the sewage Short: captions switched at the START of a long
+    pause instead of when speech resumed, so the first ~6 s ran ahead of the
+    voice while the middle stayed in sync.
+
+    Here EVERY word end may take one pause (monotone, at most one pause per word,
+    tolerance-bounded) and the assignment minimises the summed distance between
+    the length-weighted estimate and the pause. The rest of the words fall back
+    to proportional distribution inside the resulting blocks.
+    """
+    n = len(words)
+    m = len(pool)
+    if n == 0 or m == 0:
+        return []
+    TOL = 1.1
+    INF = float('inf')
+    # dp[i][j] = min cost using pauses[0..j-1] for word ends[0..i-1]
+    dp = [[INF] * (m + 1) for _ in range(n + 1)]
+    back = [[0] * (m + 1) for _ in range(n + 1)]
+    for j in range(m + 1):
+        dp[0][j] = 0.0
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            # Option A: word i-1 takes no pause
+            best = dp[i - 1][j]
+            choice = 0
+            # Option B: word i-1 is anchored to pause j-1
+            p_start, p_end = pool[j - 1]
+            if p_end <= audio_duration - 0.12:
+                d = abs(lin_ends[i - 1] - p_start)
+                if d <= TOL and dp[i - 1][j - 1] + d < best:
+                    best = dp[i - 1][j - 1] + d
+                    choice = 1
+            dp[i][j] = best
+            back[i][j] = choice
+    # Backtrack
+    anchors: List[Tuple[int, Tuple[float, float]]] = []
+    i, j = n, m
+    while i > 0 and j > 0:
+        if back[i][j] == 1:
+            anchors.append((i - 1, pool[j - 1]))
+            i -= 1
+            j -= 1
+        else:
+            i -= 1
+    anchors.reverse()
+    return anchors
+
+
 def _build_word_times(words: List[str], audio_duration: float,
                       pauses: List[Tuple[float, float]],
                       micro: Optional[List[Tuple[float, float]]] = None,
@@ -622,54 +677,48 @@ def _build_word_times(words: List[str], audio_duration: float,
     scale = audio_duration / raw_ends[-1]
     lin_ends = [e * scale for e in raw_ends]
 
-    # ── Anchor phrase-final words to real pauses ──
-    # Anchor candidates = the words where the VISIBLE caption changes. That is
-    # every sentence/comma end (`,` `;` `:` `.` `!` `?`) AND every display-chunk
-    # boundary passed in via `anchor_words` (the renderer splits the script into
-    # 3-4 word caption chunks; their boundaries need anchors too, otherwise the
-    # captions inside a long speech block are only interpolated).
-    # Prefer the fine-grained (micro) pause list when available.
+    # Anchor candidates: every word end may take one real pause. With the fine
+    # (micro) pause list a monotone DP picks the best global assignment; without
+    # it we keep the older greedy phrase-boundary match.
     pool = micro if micro else pauses
-    if anchor_words is not None:
-        phrase_idxs = sorted(set(anchor_words) | {i for i, w in enumerate(words) if _is_phrase_end(w)})
-    else:
-        phrase_idxs = [i for i, w in enumerate(words) if _is_phrase_end(w)]
     anchor_idx: List[int] = []          # word indices pinned to a pause
     anchor_pause: List[Tuple[float, float]] = []  # matching pause (start, end)
-    pi = 0
-    prev_anchored_word = -1
-    for si in phrase_idxs:
-        # Linear estimate of where this phrase boundary lands
-        est = lin_ends[si]
-        tol = 1.0 if micro else 1.6
+    if micro:
+        for wi, pt in _anchor_words_dp(words, lin_ends, pool, audio_duration):
+            anchor_idx.append(wi)
+            anchor_pause.append(pt)
+    else:
         if anchor_words is not None:
-            tol = min(tol, 0.85)    # dense anchors: keep them tight & honest
-        while pi < len(pool) and pool[pi][1] < est - tol:
-            pi += 1
-        if pi >= len(pool):
-            break
-        # Among the pauses inside the tolerance window pick the best one:
-        # longer pauses win (they are real boundaries), with a mild preference
-        # for the one closest to the estimate.
-        best = None
-        best_score = -1.0
-        for k in range(pi, len(pool)):
-            p_start, p_end = pool[k]
-            if p_start - est > tol:
+            phrase_idxs = sorted(set(anchor_words) | {i for i, w in enumerate(words) if _is_phrase_end(w)})
+        else:
+            phrase_idxs = [i for i, w in enumerate(words) if _is_phrase_end(w)]
+        pi = 0
+        for si in phrase_idxs:
+            est = lin_ends[si]
+            tol = 1.6
+            while pi < len(pool) and pool[pi][1] < est - tol:
+                pi += 1
+            if pi >= len(pool):
                 break
-            dur = p_end - p_start
-            score = dur - 0.25 * abs(p_start - est)
-            if p_end > audio_duration - 0.15:   # trailing pause: never an anchor
+            best = None
+            best_score = -1.0
+            for k in range(pi, len(pool)):
+                p_start, p_end = pool[k]
+                if p_start - est > tol:
+                    break
+                dur = p_end - p_start
+                score = dur - 0.25 * abs(p_start - est)
+                if p_end > audio_duration - 0.15:
+                    continue
+                if score > best_score:
+                    best_score = score
+                    best = k
+            if best is None:
                 continue
-            if score > best_score:
-                best_score = score
-                best = k
-        if best is None:
-            continue
-        p_start, p_end = pool[best]
-        anchor_idx.append(si)
-        anchor_pause.append((p_start, p_end))
-        pi = best + 1
+            p_start, p_end = pool[best]
+            anchor_idx.append(si)
+            anchor_pause.append((p_start, p_end))
+            pi = best + 1
 
     # ── Plausibility filter ──
     # Drop anchors that would squeeze a chunk into less time than speech can
