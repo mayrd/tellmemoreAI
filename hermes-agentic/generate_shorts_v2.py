@@ -202,6 +202,215 @@ def step_fetch_mixed_assets(query: str, n_images: int = 6, n_videos: int = 2) ->
 
 
 # ══════════════════════════════════════════════════════════════
+# Step 1b: Beat-aware fetching (one image per story beat) — 2026-10-01
+# ══════════════════════════════════════════════════════════════
+# Why: a single Pexels query for the whole short returns images that do not tell the
+# story (observed on a Saturn-moon short: `geyser snow winter` produced Icelandic
+# geysers for a story about salty ice grains in Saturn's E ring). Now every story beat
+# gets its own query, and space topics can use real public-domain NASA imagery
+# (`nasa:<query>`). Same feedback: the FIRST image (the hook) must be the eye-catcher,
+# because it decides performance.
+
+def _pexels_key() -> str:
+    key = os.environ.get("PEXELS_API_KEY", "")
+    if key:
+        return key
+    for envf in (os.path.expanduser("~/.env"), "/opt/data/.env"):
+        try:
+            for line in Path(envf).read_text().splitlines():
+                if line.startswith("PEXELS_API_KEY="):
+                    return line.split("=", 1)[1].strip()
+        except OSError:
+            continue
+    return ""
+
+
+def _pexels_candidates(query: str, n: int = 6) -> List[Dict]:
+    """Raw Pexels search INCLUDING the alt text (the pexels.py wrapper drops it).
+
+    alt is the only cheap relevance signal before rendering; candidates whose alt text
+    contains query words move to the front (stable sort, so Pexels' own ranking is kept
+    on ties). Without a key/fallback: wrapper search without alt."""
+    out: List[Dict] = []
+    key = _pexels_key()
+    if key:
+        url = ("https://api.pexels.com/v1/search?query=" + query.replace(" ", "%20")
+               + f"&orientation=portrait&per_page={max(1, n)}")
+        r = subprocess.run(["curl", "-s", "--max-time", "25", url,
+                            "-H", f"Authorization: {key}"], capture_output=True, text=True)
+        try:
+            for p in json.loads(r.stdout).get("photos", []):
+                src = p.get("src") or {}
+                out.append({"url": src.get("large2x") or src.get("large") or src.get("original"),
+                            "alt": p.get("alt", ""), "id": p.get("id")})
+        except (json.JSONDecodeError, AttributeError):
+            out = []
+    if not out:
+        from pexels import search_photos
+        for p in search_photos(query, n=n, orientation="portrait"):
+            out.append({"url": p["url"], "alt": "", "id": p.get("id")})
+    words = [w for w in re.findall(r"[a-z]+", query.lower()) if len(w) > 3]
+    if words:
+        out.sort(key=lambda c: -sum(1 for w in words if w in (c.get("alt") or "").lower()))
+    return out
+
+
+def _parse_beat_specs(spec: str) -> List[Tuple[str, str]]:
+    """'nasa:enceladus plume | pexels:ice crystal macro' -> [('nasa', ...), ('pexels', ...)].
+
+    No prefix means Pexels. Order = narration order (image 1 = hook)."""
+    beats: List[Tuple[str, str]] = []
+    for part in re.split(r"\s*\|\s*", spec or ""):
+        part = part.strip()
+        if not part:
+            continue
+        head, sep, rest = part.partition(":")
+        if sep and head.strip().lower() in ("pexels", "nasa"):
+            beats.append((head.strip().lower(), rest.strip()))
+        else:
+            beats.append(("pexels", part))
+    return beats
+
+
+def step_fetch_beats(beat_specs: List[Tuple[str, str]], n_images: int = 5,
+                     n_videos: int = 0) -> Dict:
+    """One image per story beat, in narration order.
+
+    Images are distributed evenly across the beats (the hook takes the remainder first).
+    Each beat also logs its alt text/title, so the run log shows whether the images
+    actually match the story."""
+    from pexels import download_photo
+
+    tmp_dir = tempfile.mkdtemp(prefix="shorts_v2_assets_")
+    result: Dict = {"images": [], "videos": [], "video_meta": [], "meta": [],
+                    "_tmp_dir": tmp_dir}
+    n_beats = max(1, len(beat_specs))
+    per = [n_images // n_beats] * n_beats
+    for i in range(n_images - sum(per)):
+        per[i] += 1
+
+    idx = 0
+    for bi, (src, q) in enumerate(beat_specs):
+        want = per[bi]
+        if want <= 0:
+            continue
+        print(f"  Beat {bi + 1}/{n_beats} [{src}] '{q}' -> {want} image(s)")
+        picked = 0
+        if src == "nasa":
+            try:
+                import nasa_images
+                cands = nasa_images.search_images(q, n=want + 2)
+            except Exception as e:                      # Netz/Filterproblem
+                print(f"    NASA-Suche fehlgeschlagen: {e}", file=sys.stderr)
+                cands = []
+            for c in cands:
+                if picked >= want:
+                    break
+                path = os.path.join(tmp_dir, f"img_{idx:03d}.jpg")
+                try:
+                    ok = nasa_images.download_image(c, path)
+                except Exception as e:
+                    print(f"    NASA-Download fehlgeschlagen: {e}", file=sys.stderr)
+                    ok = None
+                if not ok:
+                    continue
+                result["images"].append(ok)
+                result["meta"].append({"beat": bi + 1, "source": "nasa",
+                                       "query": q, "alt": c.get("title", "")})
+                print(f"    + {c.get('title', '')[:70]}")
+                picked += 1
+                idx += 1
+        else:
+            for p in _pexels_candidates(q, want + 3):
+                if picked >= want:
+                    break
+                path = os.path.join(tmp_dir, f"img_{idx:03d}.jpg")
+                try:
+                    download_photo(p["url"], path)
+                except Exception as e:
+                    print(f"    Download fehlgeschlagen: {e}", file=sys.stderr)
+                    continue
+                result["images"].append(path)
+                result["meta"].append({"beat": bi + 1, "source": "pexels",
+                                       "query": q, "alt": p.get("alt", "")})
+                print(f"    + {(p.get('alt') or '(kein alt)')[:70]}")
+                picked += 1
+                idx += 1
+        if picked == 0:
+            print(f"    WARNING: no image for beat {bi + 1} ({src}:{q})", file=sys.stderr)
+
+    print(f"  Beat images: {len(result['images'])} (videos: {len(result['videos'])})")
+    return result
+
+
+def _ensure_portrait(image_path: str, resolution: Tuple[int, int] = (1080, 1920),
+                     mode: str = "auto") -> str:
+    """Fit an image to the target aspect — crop, black bars or blurred background.
+
+    `zoompan` scales the zoom window hard to s=WxH, so a 16:9 NASA image would be
+    squeezed without preprocessing. Modes:
+      crop  = scale to cover + centre crop (for (near) portrait images)
+      pad   = fully visible on black bars (space: the background is black anyway)
+      blur  = fully visible over a blurred full-frame copy (colourful landscapes)
+      auto  = crop for very wide images, otherwise pad when the image is mostly black,
+              otherwise blur
+    """
+    w, h = resolution
+    try:
+        info = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries",
+             "stream=width,height", "-of", "csv=p=0", image_path],
+            capture_output=True, text=True, timeout=30).stdout.strip().split(",")
+        iw, ih = int(info[0]), int(info[1])
+    except (ValueError, IndexError, subprocess.SubprocessError):
+        return image_path
+    if not iw or not ih:
+        return image_path
+
+    target_ar = w / h
+    if abs((iw / ih) - target_ar) <= 0.02 * target_ar:
+        return image_path                       # already matches
+
+    if mode == "auto":
+        ar = iw / ih
+        if ar >= 1.6:
+            # Very wide (panorama/16:9): a centre crop fills the frame and stays sharp
+            # (a 8888x4544 Saturn panorama crops to a 2556x4544 slice).
+            mode = "crop"
+        else:
+            # 4:3 / square: show everything. Dark space images on black bars (invisible),
+            # colourful landscape material over a blurred full-frame copy.
+            mode = "pad"
+            try:
+                from PIL import Image, ImageStat
+                mean = ImageStat.Stat(Image.open(image_path).convert("L")
+                                      .resize((64, 64))).mean[0]
+                if mean >= 45:
+                    mode = "blur"
+            except Exception:
+                pass
+
+    out = os.path.splitext(image_path)[0] + f"_{mode}.jpg"
+    if mode == "pad":
+        vf = (f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+              f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black")
+        cmd = ["ffmpeg", "-y", "-i", image_path, "-vf", vf, "-q:v", "3", out]
+    elif mode == "blur":
+        fc = (f"[0]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
+              f"gblur=sigma=30[bg];"
+              f"[0]scale={w}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2")
+        cmd = ["ffmpeg", "-y", "-i", image_path, "-filter_complex", fc, "-q:v", "3", out]
+    else:
+        vf = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
+        cmd = ["ffmpeg", "-y", "-i", image_path, "-vf", vf, "-q:v", "3", out]
+    try:
+        _run_ffmpeg(cmd, timeout=180, label=f"{mode} {os.path.basename(image_path)}")
+        return out
+    except Exception:
+        return image_path
+
+
+# ══════════════════════════════════════════════════════════════
 # Step 2: Generate TTS audio
 # ══════════════════════════════════════════════════════════════
 
@@ -342,6 +551,7 @@ def step_prepare_segments(
     zoom_range: Tuple[float, float],
     resolution: Tuple[int, int],
     fps: int,
+    image_fit: str = "auto",
 ) -> List[Dict]:
     """Prepare all segments: Ken Burns for images, normalize for videos.
 
@@ -390,6 +600,7 @@ def step_prepare_segments(
                 z_start, z_end = zs, ze
             else:
                 z_start, z_end = ze, zs
+            src_path = _ensure_portrait(src_path, resolution, image_fit)  # else zoompan squeezes it
             print(f"  Segment {i}: [IMAGE] Ken Burns {os.path.basename(src_path)} zoom={z_start}->{z_end}")
             _ken_burns_image(src_path, seg_path, segment_duration,
                              z_start, z_end, resolution, fps=fps)
@@ -1116,7 +1327,9 @@ def step_final_compose(
         "-map", "2:a",
         "-c:v", "libx264", "-preset", "fast", "-crf", "23",
         "-pix_fmt", "yuv420p", "-r", str(fps),
-        "-c:a", "aac", "-b:a", "128k",
+        # Audio ALWAYS 48 kHz stereo: Gemini/edge deliver 24 kHz mono, and Telegram /
+        # YouTube sometimes drop the track entirely in that shape.
+        "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
         "-shortest",
         "-movflags", "+faststart",
         output_path,
@@ -1159,11 +1372,14 @@ def generate_shorts_v2(
     resolution: Tuple[int, int] = DEFAULT_RESOLUTION,
     fps: int = DEFAULT_FPS,
     cleanup: bool = True,
+    queries: Optional[List[str]] = None,
+    audio_file: Optional[str] = None,
+    image_fit: str = "auto",
 ) -> str:
     """Full v2 pipeline: Pexels videos+images → Ken Burns → Crossfade → Captions → MP4.
 
     Args:
-        query: Topic/keywords for Pexels search.
+        query: Topic/keywords for Pexels search (ignored when `queries` is given).
         output_path: Path for the final output MP4.
         script_text: Optional custom script. If None, uses template.
         voice: edge-tts voice name.
@@ -1175,6 +1391,13 @@ def generate_shorts_v2(
         resolution: Target (width, height).
         fps: Target frames per second.
         cleanup: If True, remove temp files after completion.
+        queries: Optional list of beat specs ('pexels:...'/'nasa:...'), one per story
+            beat in narration order — image 1 is the hook (the strongest image of the
+            story). Overrides `query`.
+        audio_file: Optional existing audio track — skips the TTS step (fast re-render
+            of a visual fix without paying the TTS time again).
+        image_fit: 'auto' (default), 'crop', 'pad' (black bars) or 'blur' for images
+            whose aspect is not 9:16 (NASA images are usually landscape).
 
     Returns:
         Path to the final output video.
@@ -1190,9 +1413,18 @@ def generate_shorts_v2(
         w, h = resolution
         print(f"Script ({len(script_text.split())} words): {script_text[:100]}...")
 
-        # ── Step 1: Fetch mixed assets ──
-        assets = timer.run("Fetch Pexels assets", step_fetch_mixed_assets,
-                           query, n_images, n_videos)
+        # ── Step 1: Fetch assets (beat-aware when queries were passed) ──
+        if queries:
+            beat_specs = _parse_beat_specs(" | ".join(queries))
+            if not beat_specs:
+                raise RuntimeError("queries passed, but no beats recognised")
+            print(f"  Beat-Queries ({len(beat_specs)}): "
+                  + ", ".join(f"{s}:{q}" for s, q in beat_specs))
+            assets = timer.run("Fetch beat assets", step_fetch_beats,
+                               beat_specs, n_images, n_videos)
+        else:
+            assets = timer.run("Fetch Pexels assets", step_fetch_mixed_assets,
+                               query, n_images, n_videos)
         image_paths = assets["images"]
         video_paths = assets["videos"]
         if assets.get("_tmp_dir"):
@@ -1204,11 +1436,16 @@ def generate_shorts_v2(
                 f"+ {len(video_paths)} videos. Try a different query."
             )
 
-        # ── Step 2: Generate TTS ──
-        audio_path, audio_duration = timer.run(
-            "Generate TTS", step_generate_tts, script_text, voice, tts
-        )
-        tmp_files.append(audio_path)
+        # ── Step 2: TTS (or reuse an existing audio track) ──
+        if audio_file:
+            audio_path = audio_file
+            audio_duration = _probe_duration(audio_file)
+            print(f"  Reusing audio: {audio_file} ({audio_duration:.1f}s)")
+        else:
+            audio_path, audio_duration = timer.run(
+                "Generate TTS", step_generate_tts, script_text, voice, tts
+            )
+            tmp_files.append(audio_path)
 
         # Auto-adjust segment duration to match audio
         # Total segments = images + videos (interleaved)
@@ -1228,7 +1465,7 @@ def generate_shorts_v2(
             "Prepare segments",
             step_prepare_segments,
             image_paths, video_paths,
-            adjusted_seg_duration, zoom_range, resolution, fps,
+            adjusted_seg_duration, zoom_range, resolution, fps, image_fit,
         )
         tmp_dirs.append(seg_tmp_dir)
 
@@ -1296,7 +1533,13 @@ Examples:
   python3 generate_shorts_v2.py --query "space" --script "Space is vast and full of mysteries." --images 6 --videos 3 --crossfade 0.6
         """,
     )
-    parser.add_argument("--query", required=True, help="Topic/keywords for Pexels search")
+    parser.add_argument("--query", default=None, help="Topic/keywords for Pexels search (alternative to --queries)")
+    parser.add_argument("--queries", default=None,
+                        help="One image query per story beat, separated by ' | ', in narration order "
+                             "(image 1 = hook). Prefix 'nasa:' uses public-domain NASA imagery, otherwise Pexels. "
+                             "Example: \"nasa:enceladus plume | pexels:ice crystal macro | nasa:dark side moon enceladus\"")
+    parser.add_argument("--audio", default=None,
+                        help="Reuse an existing audio track (skips TTS) — for visual fixes / re-renders")
     parser.add_argument("--output", "-o", default="short_v2_output.mp4")
     parser.add_argument("--script", default=None, help="Custom TTS script text")
     parser.add_argument("--voice", default=DEFAULT_VOICE, help=f"TTS voice (default: {DEFAULT_VOICE}; chirp voices: Puck, Kore, Charon, ...; kokoro voices: af_heart, am_michael, ...; chatterbox: optional path to a reference WAV for voice cloning)")
@@ -1311,9 +1554,13 @@ Examples:
     parser.add_argument("--fps", type=int, default=DEFAULT_FPS)
     parser.add_argument("--width", type=int, default=DEFAULT_RESOLUTION[0])
     parser.add_argument("--height", type=int, default=DEFAULT_RESOLUTION[1])
+    parser.add_argument("--image-fit", default="auto", choices=["auto", "crop", "pad", "blur"],
+                        help="Fitting of non-9:16 images: auto (default), crop, pad (black bars, good for space) or blur")
     parser.add_argument("--no-cleanup", action="store_true", help="Keep temp files")
 
     args = parser.parse_args()
+    if not args.query and not args.queries:
+        parser.error("--query or --queries is required")
     resolution = (args.width, args.height)
     zoom_range = (args.zoom_start, args.zoom_end)
     if args.tts == "chirp" and args.voice == DEFAULT_VOICE:
@@ -1322,7 +1569,11 @@ Examples:
         args.voice = KOKORO_VOICE
 
     print(f"generate_shorts_v2.py — YouTube Shorts Builder v2")
-    print(f"  Query: {args.query}")
+    print(f"  Query: {args.query or '(beat-queries)'}")
+    if args.queries:
+        print(f"  Queries: {args.queries}")
+    if args.audio:
+        print(f"  Audio: {args.audio} (TTS skipped)")
     print(f"  Output: {args.output}")
     print(f"  Resolution: {resolution[0]}x{resolution[1]}@{args.fps}fps")
     print(f"  Images: {args.images}, Videos: {args.videos}")
@@ -1331,7 +1582,7 @@ Examples:
 
     try:
         result = generate_shorts_v2(
-            query=args.query,
+            query=args.query or "",
             output_path=args.output,
             script_text=args.script,
             voice=args.voice,
@@ -1344,6 +1595,9 @@ Examples:
             resolution=resolution,
             fps=args.fps,
             cleanup=not args.no_cleanup,
+            queries=([args.queries] if args.queries else None),
+            audio_file=args.audio,
+            image_fit=args.image_fit,
         )
         print(f"\nOutput: {result}")
     except Exception as e:

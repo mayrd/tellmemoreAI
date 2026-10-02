@@ -55,6 +55,31 @@ Research → Script (curiosity-gap) → Pexels Videos+Images → Ken Burns → C
 - ALL fetched images must be used as segments (never silently discard)
 ```
 
+**Beat-aware sourcing (`--queries`) — one image query per story beat.** A single query
+cannot tell the story: `--query "geyser snow winter"` for a story about salty ice grains
+in Saturn's E ring produced Icelandic geysers on snow. Pass one query per sentence in
+narration order; image 1 is the hook and should be the most impressive shot of the story.
+
+```
+--queries "nasa:saturn portrait | nasa:enceladus plume | pexels:ice crystal macro | pexels:scientist microscope laboratory | nasa:dark side moon enceladus"
+```
+
+- Prefix `nasa:` uses the NASA Image and Video Library (nasa_images.py, public domain,
+  no key) — for space/astronomy topics stock photos only offer decor, so the pipeline
+  used to fall back to metaphors. Titles that look like data plots (spectrum/chart/
+  model/movie/...) are filtered out automatically; verify the hook frame anyway.
+- Pexels candidates are re-ranked by their `alt` text (the wrapper drops `alt`, so the
+  raw endpoint is used) and every beat logs its image title, so the run log shows whether
+  the images match the narration.
+- `--image-fit auto|crop|pad|blur` handles non-9:16 sources: `zoompan` scales the zoom
+  window hard to the output size, so a 16:9 image would be squeezed. `auto` crops very
+  wide panoramas, pads mostly black space images on black bars, and puts colourful
+  landscape material over a blurred full-frame copy.
+- Hook check (cheap, catches the most common miss): extract the first frame
+  (`ffmpeg -y -ss 1 -i out.mp4 -frames:v 1 frame.jpg`) and look at it. If it is mostly
+  black or feels empty, change the hook query and re-render the visuals only — keep the
+  audio (`--audio existing.m4a`) so the TTS step (minutes) is skipped.
+
 ### Step 3: Generate TTS Audio
 
 Three interchangeable backends via `--tts` (default `edge`):
@@ -137,6 +162,19 @@ python3 generate_shorts.py \
   --output /tmp/short.mp4 \
   --script "Your curiosity-gap script text here..." \
   --images 6
+
+# One image query per story beat (image 1 = hook), stock + public-domain NASA imagery
+python3 generate_shorts_v2.py \
+  --queries "nasa:saturn portrait | nasa:enceladus plume | pexels:ice crystal macro" \
+  --output /tmp/short.mp4 \
+  --images 3 --videos 0 --image-fit auto
+
+# Re-render visuals only, keeping the existing voice track (skips the TTS step)
+python3 generate_shorts_v2.py \
+  --queries "nasa:dark side moon enceladus" \
+  --output /tmp/short_fix.mp4 \
+  --script "$(cat script.txt)" \
+  --images 5 --audio /tmp/audio.m4a
 
 # Upload (always use the canonical upload script)
 python3 youtube_upload.py /tmp/short.mp4 "Video Title Here"
@@ -249,3 +287,7 @@ Weekly: Monday analytics → update style preferences → next week's content im
 17. **Batch updates hit quota:** YouTube API daily quota is ~10,000 units. Each `videos.update` costs ~50 units. Batch 30+ videos cautiously.
 18. **Write temp files to `/tmp/`:** Never write to system-protected directories.
 19. **Pexels key loading:** From `PEXELS_API_KEY` env var or `.env` file. No hardcoded keys.
+20. **One query for the whole short ≠ storytelling:** images sourced from a single metaphorical query can look great and still be off-topic (geysers on snow for a Saturn-moon story). Use `--queries` with one query per narration beat; check the per-beat titles in the log and the first frame before uploading.
+21. **`zoompan` squeezes non-9:16 images:** it scales the zoom window hard to `s=WxH`, so 16:9 sources come out distorted. `--image-fit auto` handles this (crop / black bars / blurred background) — never feed a landscape image straight into the Ken Burns step.
+22. **24 kHz mono audio:** TTS backends deliver it, and Telegram/YouTube sometimes drop the track in that shape. The final compose always encodes 48 kHz stereo (`-ar 48000 -ac 2`).
+23. **NASA search returns data plots first:** searching `enceladus plume` tops out with the VIMS spectrum. `nasa_images.search_images()` filters those titles; still verify the hook frame, and prefer high-resolution releases (many old Cassini JPEGs are only ~1000 px wide and get soft when scaled to 1920).
