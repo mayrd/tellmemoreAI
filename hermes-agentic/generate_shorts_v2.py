@@ -47,6 +47,13 @@ DEFAULT_CROSSFADE_DURATION = 0.5
 DEFAULT_KB_ZOOM = (1.0, 1.08)
 DEFAULT_VOICE = "en-US-BrianNeural"
 DEFAULT_TTS = "edge"  # edge | chirp | kokoro — TTS backend selector
+
+# ── Length lock (2026-10-22: shorts must run longer than 30 s) ──
+# Measured speech rate in production varies between 2.2 and 3.0 words/s, so 105
+# words is the floor for >30 s; 108-118 targets roughly 36-49 s.
+# Disable with MIN_WORDS=0 / MIN_DURATION=0 (e.g. for tests or other pipelines).
+MIN_WORDS = int(os.environ.get("MIN_WORDS", "105"))
+MIN_DURATION = float(os.environ.get("MIN_DURATION", "32"))
 CHIRP_VOICE = "Puck"
 KOKORO_VOICE = "af_heart"
 DEFAULT_N_IMAGES = 6
@@ -420,6 +427,14 @@ def step_generate_tts(script_text: str, voice: str, tts: str = DEFAULT_TTS) -> T
     Returns:
         Tuple of (audio_path, duration_seconds).
     """
+    # Length lock BEFORE the expensive TTS step (chatterbox takes ~15-20 min per run).
+    wc = len(script_text.split())
+    if MIN_WORDS and wc < MIN_WORDS:
+        print(f"ERROR: script is only {wc} words, at least {MIN_WORDS} are needed "
+              f"to keep the video longer than 30 s (2.2-3.0 words/s). "
+              f"Extend the script by 1-2 substantive sentences and rerun. "
+              f"Emergency exit: MIN_WORDS=0.")
+        sys.exit(4)
     if tts == "chirp":
         import chirp_tts
         audio_path = tempfile.mktemp(prefix="shorts_v2_tts_", suffix=".mp3")
@@ -1446,6 +1461,14 @@ def generate_shorts_v2(
                 "Generate TTS", step_generate_tts, script_text, voice, tts
             )
             tmp_files.append(audio_path)
+
+        # Length lock (2026-10-22): shorts must run longer than 30 s. The speech rate
+        # varies, so check the MEASURED audio duration, not the word count alone.
+        if MIN_DURATION and audio_duration < MIN_DURATION:
+            print(f"ERROR: TTS audio is only {audio_duration:.1f}s, minimum {MIN_DURATION:.0f}s "
+                  f"(shorts > 30 s). Script had {len(script_text.split())} words - "
+                  f"add 1-2 substantive sentences and re-render. Emergency exit: MIN_DURATION=0.")
+            sys.exit(5)
 
         # Auto-adjust segment duration to match audio
         # Total segments = images + videos (interleaved)
